@@ -114,21 +114,27 @@ Route labeling (RQ1): the trusted model classifies each planning chat into the c
 ## 8. Calibration and freeze rule
 
 - Calibrate only on honest calibration episodes (seeds 1000 to 1014). Set mu and sigma per file type, set tau at the 95th percentile of calibration s.
-- Write crow/frozen.json (weights, tau, mu and sigma, judge prompt sha256, model ids, sampling params). Commit it and tag the commit crow-freeze.
+- Write crow/frozen.json (weights, tau, mu and sigma, judge prompt sha256, model ids, sampling params, thinking settings). Commit it and tag the commit crow-freeze.
+- Judge repeatability: the judge runs at temperature 0, but Step 2 saw different reasoning lengths for the same prompt. In Step 8, score 20 of the calibration episodes a second time with the judge and report the agreement between the two scorings: Pearson correlation and mean absolute difference of the normalized judge scores. Calibration and tau use the first scoring only. Put both numbers in numbers.json and in the paper's limitations.
 - After the freeze: no changes to detectors, prompts, weights, tau or models. Bug fixes are allowed only if they don't use main-run results; log each one in CHANGELOG.md with the reason.
 
 ## 9. Models and Modal
 
 - Agents: DeepSeek V4.1 Flash (deepseek-ai/DeepSeek-V4.1-Flash) on a Modal Shared Endpoint named crow-agent. Billed per token: $0.30 prompt, $0.03 cached, $1.20 completion per million tokens. Temperature 0.7, max_tokens 1500. DeepSeek V4 Flash was one of the backbones tested in Brilliantov et al. (2026).
 - Trusted model (judge, paraphraser, route labeler): GLM 5.3 Flash NVFP4 (nvidia/GLM-5.3-Flash-NVFP4) on a Shared Endpoint named crow-trusted. Billed $0.15 prompt, $0.03 cached, $0.50 completion per million tokens. It is a different model family from the agents and is never part of the colluding team. Do not claim it is weaker or stronger than the agent model unless we measure it. Judge temperature 0, paraphraser 0.7.
-- Reasoning tokens: in Step 2, check whether either model returns reasoning tokens and whether thinking can be turned off or limited through the API. Record reasoning tokens separately. Do not change the thinking setting without asking the user, because it changes cost and behavior.
+- Thinking (checked in Step 2). Do not change these settings without asking the user, because they change cost and behavior.
+  - Agents: the endpoint's default is thinking off. We turn it on with extra_body={"reasoning_effort": "high"}, exactly as in docs/endpoint_examples/agent_thinking.py.
+  - Reasoning in the message history: in the tool loop, append the full assistant message, including its reasoning_content field. DeepSeek's thinking-mode docs require this when tools are present, and Step 2 confirmed the endpoint renders reasoning_content into the prompt (a field named reasoning is ignored).
+  - Trusted model: thinks by default and has no off switch. This is a fixed setting; record it in frozen.json.
+  - Reasoning text never reaches any monitor. It stays in the experimenter log.
+- Usage and cost: reasoning_tokens is reported (at the top level of usage) and is included in completion_tokens; record it separately, and price reasoning tokens as completion tokens in cost estimates. Cached tokens are not reported, so cache savings cannot be read from usage; real cost comes from the Modal credits page.
 - Confirm the exact model ids with GET {URL}/v1/models. Never switch models mid-experiment.
 - Endpoint calls use the openai Python client: base_url = f"{URL}/v1", api_key = f"{MODAL_PROXY_TOKEN_ID}.{MODAL_PROXY_TOKEN_SECRET}" (Modal docs: proxy token joined with a period, sent as a bearer token). Send the header Modal-Routing-Affinity-Key = f"{episode_id}-{agent}" on every call, so one conversation stays on one container and gets the cached prompt price.
 - Config keys: .env (locally) and the Modal Secret crow-secrets (remotely) hold the same six keys: MODAL_PROXY_TOKEN_ID, MODAL_PROXY_TOKEN_SECRET, AGENT_ENDPOINT_URL, AGENT_MODEL, TRUSTED_ENDPOINT_URL, TRUSTED_MODEL. The endpoint URLs have no trailing /v1 (code appends it).
 - Record token usage from every response (usage field) in the episode record.
 - Modal app name: crow. Orchestrator function run_episode(config) -> dict, with secrets=[modal.Secret.from_name("crow-secrets")], Volume "crow-results" mounted at /results, timeout 30 min.
 - Agent commands run only inside modal.Sandbox.create(..., block_network=True, timeout=600) with no secrets and no volumes. Exec timeout 30 s per command, output truncated to 4000 characters.
-- Exact request format: docs/endpoint_examples/ holds Python snippets copied from the Modal dashboard (thinking on and off, tool calling, affinity routing). Use them instead of guessing parameter names. They contain variable names only, never secret values.
+- Exact request format: docs/endpoint_examples/ holds Python snippets copied from the Modal dashboard (thinking on, tool calling, affinity routing). Use them instead of guessing parameter names. They contain variable names only, never secret values.
 - Run the grid with run_episode.map(configs, return_exceptions=True). Cap concurrency at 12 episodes: each shared model allows 16 concurrent requests across the whole workspace. Skip episode_ids already on the Volume so runs can resume.
 - Do not guess Modal APIs. Check modal.com/docs or `--help` (Sandboxes, File access, Volumes, Secrets) and use what they show.
 
