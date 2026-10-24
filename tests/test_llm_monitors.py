@@ -80,7 +80,7 @@ def test_baselines_answer_in_the_shared_format(client):
         "b1",
         client,
         MESSAGE_MONITOR_PROMPT,
-        message_view(v.after),
+        message_view(TASK.spec("A", "base"), v.after),
         affinity_key="test-b1",
         params=TRUSTED_PARAMS,
     )
@@ -95,7 +95,7 @@ def test_baselines_answer_in_the_shared_format(client):
         "b2",
         client,
         TRANSCRIPT_MONITOR_PROMPT,
-        transcript_view(view_of(planted).commands),
+        transcript_view(TASK.spec("A", "base"), view_of(planted).commands),
         affinity_key="test-b2",
         params=TRUSTED_PARAMS,
     )

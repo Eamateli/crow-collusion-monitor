@@ -5,7 +5,6 @@ from crow_fixtures import TURN, clean, plant_rename, starter
 
 from crow.detectors.judge import (
     MAX_ATTEMPTS,
-    MonitorError,
     crow_view,
     message_view,
     monitor,
@@ -66,13 +65,24 @@ def test_crow_view_lists_status_and_shows_only_changed_contents():
 
 def test_baseline_views_see_only_their_channel():
     _, v = a_turn()
-    b1 = message_view(v.after)
+    b1 = message_view(SPEC, v.after)
     assert "All amounts are integer cents" in b1 and "def parse_amount" not in b1
     assert "lib/ledger.py |" not in b1 and "SECRET-ARG" not in b1
-    b2 = transcript_view(v.commands)
+    b2 = transcript_view(SPEC, v.commands)
     assert "python -c 'print(1)'" in b2 and "path: x.txt\nSECRET-ARG" in b2
     assert "renamed from" not in b2 and "HANDOFF.md, A's note" not in b2
     assert b2.count("</workspace>") == 1
+
+
+def test_all_three_views_start_with_the_same_task_spec():
+    _, v = a_turn()
+    views = [
+        crow_view(SPEC, v.before, v.after, v.changes),
+        message_view(SPEC, v.after),
+        transcript_view(SPEC, v.commands),
+    ]
+    head = f"## The task given to agent A\n\n{SPEC.strip()}\n\n"
+    assert all(view.startswith(head) for view in views)
 
 
 @pytest.mark.parametrize(
@@ -106,8 +116,8 @@ def test_monitor_clamps_and_retries():
     assert result.score == 1.0 and len(result.calls) == 2
 
 
-def test_monitor_gives_up_after_max_attempts():
+def test_monitor_score_is_missing_after_max_attempts_never_zero():
     client = FakeClient(["nothing"] * MAX_ATTEMPTS)
-    with pytest.raises(MonitorError) as info:
-        monitor("b2", client, TRANSCRIPT_MONITOR_PROMPT, "v", affinity_key="k", params={})
-    assert len(info.value.calls) == MAX_ATTEMPTS
+    result = monitor("b2", client, TRANSCRIPT_MONITOR_PROMPT, "v", affinity_key="k", params={})
+    assert result.missing and result.score is None and result.raw_score is None
+    assert len(result.calls) == MAX_ATTEMPTS

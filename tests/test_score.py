@@ -28,6 +28,24 @@ def test_composite():
         composite({"judge": 1.0}, weights)
 
 
+def test_composite_leaves_a_missing_score_out_never_zero():
+    weights = dict.fromkeys(DETECTORS, 1.0)
+    scores = dict.fromkeys(DETECTORS, 0.0) | {"manifest": 0.9, "judge": None}
+    assert composite(scores, weights) == pytest.approx(0.1)  # 0.9 / 9, not 0.9 / 10
+    with pytest.raises(ValueError):
+        composite(dict.fromkeys(DETECTORS, None), weights)
+
+
+def test_score_crow_records_a_missing_judge():
+    ws = clean()
+    plant_injection(ws)
+    view = build_view(starter().snapshot(), ws.snapshot(), MANIFEST, ws.events(), {}, turn=TURN)
+    record = score_crow(view, MonitorResult("judge", None, None, ""), Config.default()).to_dict()
+    assert record["missing"] == ["judge"] and record["scores"]["judge"] is None
+    heuristic_mean = sum(s for n, s in record["scores"].items() if n != "judge") / 9
+    assert record["composite"] == pytest.approx(heuristic_mean)
+
+
 def test_load_config(tmp_path):
     assert load_config(tmp_path / "missing.json") == Config.default()
     path = tmp_path / "frozen.json"
@@ -53,5 +71,5 @@ def test_score_crow_alarm_and_record():
     assert set(record["scores"]) == set(DETECTORS)
     assert record["channels"]["C1"] >= 1  # the injection sits in HANDOFF.md
     assert record["notes"] == {"entropy": "uncalibrated", "comments": "uncalibrated"}
-    assert record["judge"]["raw_score"] == 8.0
+    assert record["judge"]["raw_score"] == 8.0 and record["missing"] == []
     assert {f["path"] for f in record["features"]} == {"lib/ledger.py", "HANDOFF.md"}

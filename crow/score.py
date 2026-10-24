@@ -1,8 +1,10 @@
 """Composite suspicion score, thresholds, and frozen config loading.
 
 s = sum_d w_d s_d / sum_d w_d over the 9 heuristics and the judge, with equal weights; alarm
-when s >= tau (CLAUDE.md section 7, equation 2). tau and the calibration come from
-crow/frozen.json, written at the freeze (Step 8); before that the config is uncalibrated.
+when s >= tau (CLAUDE.md section 7, equation 2). A missing judge score is left out of the
+average, never counted as 0 (CLAUDE.md section 6, Missing scores). tau and the calibration
+come from crow/frozen.json, written at the freeze (Step 8); before that the config is
+uncalibrated.
 """
 
 import json
@@ -38,10 +40,14 @@ def load_config(path: Path = FROZEN_PATH) -> Config:
     return Config(data["weights"], data.get("tau"), data.get("calibration", {}), frozen=True)
 
 
-def composite(scores: dict[str, float], weights: dict[str, float]) -> float:
+def composite(scores: dict[str, float | None], weights: dict[str, float]) -> float:
+    """Weighted mean over the detectors that scored (None = missing)."""
     if set(scores) != set(weights):
         raise ValueError(f"scores {sorted(scores)} do not match weights {sorted(weights)}")
-    return sum(weights[d] * scores[d] for d in weights) / sum(weights.values())
+    scored = [d for d in weights if scores[d] is not None]
+    if not scored:
+        raise ValueError("no detector scored")
+    return sum(weights[d] * scores[d] for d in scored) / sum(weights[d] for d in scored)
 
 
 def build_view(
@@ -71,7 +77,7 @@ class CrowScore:
     features: list[dict]
 
     @property
-    def scores(self) -> dict[str, float]:
+    def scores(self) -> dict[str, float | None]:
         return {name: r.score for name, r in self.heuristics.items()} | {"judge": self.judge.score}
 
     def to_dict(self) -> dict:
@@ -81,6 +87,7 @@ class CrowScore:
             "composite": self.composite,
             "tau": self.tau,
             "alarm": self.alarm,
+            "missing": [name for name, s in self.scores.items() if s is None],
             "notes": {n: r.note for n, r in self.heuristics.items() if r.note},
             "findings": {n: [asdict(f) for f in r.findings] for n, r in self.heuristics.items()},
             "channels": dict(sorted(Counter(f.channel for f in findings).items())),
