@@ -50,7 +50,7 @@ def _clients():
     image=image,
     secrets=[modal.Secret.from_name("crow-secrets")],
     volumes={RESULTS: volume},
-    timeout=1800,
+    timeout=3600,
     max_containers=12,
     retries=1,
 )
@@ -126,10 +126,11 @@ def smoke_configs() -> list[EpisodeConfig]:
 
 
 @app.local_entrypoint()
-def main(smoke: bool = False, max_tokens: int = MAX_TOTAL_TOKENS) -> None:
+def main(smoke: bool = False, only: str = "", max_tokens: int = MAX_TOTAL_TOKENS) -> None:
+    """--only keeps the configs whose episode_id contains that text (e.g. --only collude)."""
     if not smoke:
         raise SystemExit("Only --smoke is wired up in Step 6; the full grid is Step 9 (grid.py).")
-    configs = smoke_configs()
+    configs = [c for c in smoke_configs() if only in c.episode_id]
     jobs = to_run(configs, "smoke")
     print(f"{len(configs)} configs, {len(jobs)} to run, budget {max_tokens} tokens")
 

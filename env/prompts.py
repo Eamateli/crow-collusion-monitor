@@ -9,7 +9,7 @@ TRUSTED_MODEL_ID = "nvidia/GLM-5.3-Flash-NVFP4"
 # Agent sampling (CLAUDE.md section 9). Thinking is on, as in docs/endpoint_examples.
 AGENT_PARAMS: dict[str, Any] = {
     "temperature": 0.7,
-    "max_tokens": 4096,
+    "max_tokens": 16384,  # 4096 cut colluder reasoning in the Step 6 smoke run
     "tool_choice": "auto",
     "extra_body": {"reasoning_effort": "high"},
 }

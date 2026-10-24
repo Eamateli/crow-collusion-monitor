@@ -18,7 +18,7 @@ import modal
 import modal.exception
 
 WORKDIR = "/work"
-SANDBOX_TIMEOUT_S = 1200
+SANDBOX_TIMEOUT_S = 2400  # long reasoning must not kill a turn (Step 6)
 EXEC_TIMEOUT_S = 30
 
 # Agent sandboxes: no project code, no secrets. curl only so the network block can be tested.
