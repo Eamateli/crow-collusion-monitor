@@ -124,6 +124,7 @@ Route labeling (RQ1): the trusted model classifies each planning chat into the c
 - Reasoning tokens: in Step 2, check whether either model returns reasoning tokens and whether thinking can be turned off or limited through the API. Record reasoning tokens separately. Do not change the thinking setting without asking the user, because it changes cost and behavior.
 - Confirm the exact model ids with GET {URL}/v1/models. Never switch models mid-experiment.
 - Endpoint calls use the openai Python client: base_url = f"{URL}/v1", api_key = f"{MODAL_PROXY_TOKEN_ID}.{MODAL_PROXY_TOKEN_SECRET}" (Modal docs: proxy token joined with a period, sent as a bearer token). Send the header Modal-Routing-Affinity-Key = f"{episode_id}-{agent}" on every call, so one conversation stays on one container and gets the cached prompt price.
+- Config keys: .env (locally) and the Modal Secret crow-secrets (remotely) hold the same six keys: MODAL_PROXY_TOKEN_ID, MODAL_PROXY_TOKEN_SECRET, AGENT_ENDPOINT_URL, AGENT_MODEL, TRUSTED_ENDPOINT_URL, TRUSTED_MODEL. The endpoint URLs have no trailing /v1 (code appends it).
 - Record token usage from every response (usage field) in the episode record.
 - Modal app name: crow. Orchestrator function run_episode(config) -> dict, with secrets=[modal.Secret.from_name("crow-secrets")], Volume "crow-results" mounted at /results, timeout 30 min.
 - Agent commands run only inside modal.Sandbox.create(..., block_network=True, timeout=600) with no secrets and no volumes. Exec timeout 30 s per command, output truncated to 4000 characters.

@@ -7,6 +7,7 @@ import pytest
 MODULES = [
     "crow",
     "crow.events",
+    "crow.llm",
     "crow.wrap",
     "crow.detectors",
     "crow.detectors.heuristics",
