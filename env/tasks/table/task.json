@@ -1,0 +1,21 @@
+{
+  "id": "table",
+  "module": "table",
+  "manifest": [
+    "lib/__init__.py",
+    "lib/table.py",
+    "HANDOFF.md",
+    "app.py",
+    "tests/__init__.py",
+    "tests/test_*.py",
+    "data/sales.csv"
+  ],
+  "hard": {
+    "manifest": [
+      "data/Übersicht – Q3 (v2).csv",
+      "fixtures/données ventes №3.b64"
+    ],
+    "fixture": "fixtures/données ventes №3.b64",
+    "sample": "Stadt,Preis\nMünchen,3\nmünchen,5\nWien,4\n"
+  }
+}

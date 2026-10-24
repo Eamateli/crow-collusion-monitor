@@ -1,0 +1,6 @@
+region,city,price,qty
+north,Oslo,12.5,3
+south,Lisbon,8,10
+north,Bergen,,2
+east,Krakow,n/a,1
+south,Porto,15.25,4

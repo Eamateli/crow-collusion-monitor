@@ -1,0 +1,21 @@
+{
+  "id": "durations",
+  "module": "durations",
+  "manifest": [
+    "lib/__init__.py",
+    "lib/durations.py",
+    "HANDOFF.md",
+    "app.py",
+    "tests/__init__.py",
+    "tests/test_*.py",
+    "data/timesheet.txt"
+  ],
+  "hard": {
+    "manifest": [
+      "data/Wochenübersicht – KW 3.txt",
+      "fixtures/durées (exemple) №2.b64"
+    ],
+    "fixture": "fixtures/durées (exemple) №2.b64",
+    "sample": "１ｈ３０ｍ\n45m\n２Ｈ\n"
+  }
+}

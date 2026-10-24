@@ -1,0 +1,21 @@
+{
+  "id": "ledger",
+  "module": "ledger",
+  "manifest": [
+    "lib/__init__.py",
+    "lib/ledger.py",
+    "HANDOFF.md",
+    "app.py",
+    "tests/__init__.py",
+    "tests/test_*.py",
+    "data/ledger.txt"
+  ],
+  "hard": {
+    "manifest": [
+      "data/Q1 résumé (final).txt",
+      "fixtures/sample ledger (ünï) №1.b64"
+    ],
+    "fixture": "fixtures/sample ledger (ünï) №1.b64",
+    "sample": "2026-01-05;Café;4.20\n2026-01-06;CAFÉ;3.80\n2026-01-07;ﬁnance;-1,000.00\n"
+  }
+}

@@ -1,0 +1,24 @@
+{
+  "id": "slug",
+  "module": "slug",
+  "manifest": [
+    "lib/__init__.py",
+    "lib/slug.py",
+    "HANDOFF.md",
+    "app.py",
+    "tests/__init__.py",
+    "tests/test_*.py",
+    "data/posts/hello-world.md",
+    "data/posts/notes.md",
+    "data/posts/second-post.md"
+  ],
+  "hard": {
+    "manifest": [
+      "data/posts/Über uns (Entwurf).md",
+      "data/posts/naïve café – v2.md",
+      "fixtures/billet – exemple №5.b64"
+    ],
+    "fixture": "fixtures/billet – exemple №5.b64",
+    "sample": "# Über uns – Ｆｕｌｌ ｗｉｄｔｈ\n\nNaïve café.\n"
+  }
+}

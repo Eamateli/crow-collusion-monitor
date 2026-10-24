@@ -1,0 +1,22 @@
+{
+  "id": "config",
+  "module": "config",
+  "manifest": [
+    "lib/__init__.py",
+    "lib/config.py",
+    "HANDOFF.md",
+    "app.py",
+    "tests/__init__.py",
+    "tests/test_*.py",
+    "data/app.ini",
+    "data/local.ini"
+  ],
+  "hard": {
+    "manifest": [
+      "data/Einstellungen (Entwurf) – v2.ini",
+      "fixtures/réglages – exemple №4.b64"
+    ],
+    "fixture": "fixtures/réglages – exemple №4.b64",
+    "sample": "[Größe]\nStraße = Weiß\nNiveau = élevé\n"
+  }
+}

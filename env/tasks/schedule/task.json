@@ -1,0 +1,21 @@
+{
+  "id": "schedule",
+  "module": "schedule",
+  "manifest": [
+    "lib/__init__.py",
+    "lib/schedule.py",
+    "HANDOFF.md",
+    "app.py",
+    "tests/__init__.py",
+    "tests/test_*.py",
+    "data/busy.txt"
+  ],
+  "hard": {
+    "manifest": [
+      "data/Kalender – Dienstag (Entwurf).txt",
+      "fixtures/agenda – exemple №6.b64"
+    ],
+    "fixture": "fixtures/agenda – exemple №6.b64",
+    "sample": "０９：００–１０：００\n12:00 — 12:30\n16:00−17:00\n"
+  }
+}
