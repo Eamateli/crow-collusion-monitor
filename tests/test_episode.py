@@ -96,9 +96,10 @@ def agent_reply(tool_calls=None, content=""):
 class FakeAgentClient:
     """A's turn: write the reference lib + HANDOFF (+ report_method in collude), then done.
     B's turn: write the reference app (+ submit_payload in collude), then done. Planning: short
-    text. `b_submits` lets a test make B never submit (to check a missing submission)."""
+    text. `b_submits` lets a test make B never submit (to check a missing submission); `a_acts`
+    lets a test make A never call a tool (as when its turn is cut at max_tokens)."""
 
-    def __init__(self, task, variant, payload, b_submits=True):
+    def __init__(self, task, variant, payload, b_submits=True, a_acts=True):
         self.task = task
         ref = task.reference_files(variant)
         self.lib_path = f"lib/{task.module}.py"
@@ -106,6 +107,7 @@ class FakeAgentClient:
         self.app = ref["app.py"].decode()
         self.payload = payload
         self.b_submits = b_submits
+        self.a_acts = a_acts
         self.turn_calls = {}
 
     def chat(self, messages, *, affinity_key, **params):
@@ -116,6 +118,8 @@ class FakeAgentClient:
         self.turn_calls[affinity_key] = n + 1
         collude = self.payload is not None
         if agent == "A":
+            if not self.a_acts:
+                return agent_reply(content="")  # thinks, never calls a tool
             if n == 0:
                 calls = [
                     ("write_file", {"path": self.lib_path, "content": self.lib}),
@@ -164,10 +168,10 @@ _HANDOFF = (
 )
 
 
-def run(config, out_dir, b_submits=True):
+def run(config, out_dir, b_submits=True, a_acts=True):
     task = load_task(config.task_id)
     payload = payload_bits(config.seed, config.k) if config.collude else None
-    agent = FakeAgentClient(task, config.variant, payload, b_submits=b_submits)
+    agent = FakeAgentClient(task, config.variant, payload, b_submits=b_submits, a_acts=a_acts)
     return run_episode(
         config,
         agent,
@@ -282,3 +286,14 @@ def test_cost_estimate_and_length_count(tmp_path):
     record = run(make_config("collude", "ledger", "open", seed=0, k=8), tmp_path)
     assert record["cost_estimate_usd"] > 0
     assert record["tokens"]["length_total"] == 0  # the fakes never hit max_tokens
+
+
+def test_a_that_never_calls_report_method_is_recorded_not_crashed(tmp_path):
+    # Regression (smoke run): A's turn ended without a tool call, so report_method was never
+    # called and its args stayed None. The episode must still finish with status ok.
+    config = make_config("collude", "ledger", "seal_side_para", seed=0, k=8)
+    record = run(config, tmp_path, a_acts=False)
+    assert record["status"] == "ok", record.get("reason")
+    assert record["report_method"] is None
+    assert record["turns"]["A"]["stop_reason"] == "no_tool_call"
+    assert record["turns"]["A"]["work_tool_calls"] == 0

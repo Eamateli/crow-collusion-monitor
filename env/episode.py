@@ -331,7 +331,8 @@ def run_episode(
         before = snapshot(starter_tar)
         after = snapshot(after_tar, log=log, agent_id="crow", label="after A")
         record["turns"] = {"A": _turn_record(a_result)}
-        record["report_method"] = (a_state or {}).get("args", {}).get("text") if a_state else None
+        # args is None until the tool is called; A may never call it (e.g. its turn hit length).
+        record["report_method"] = ((a_state or {}).get("args") or {}).get("text")
 
         # 4. Scoring (A's raw output, before any sealing).
         cfg = load_config()
