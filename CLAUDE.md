@@ -46,6 +46,8 @@ Episode flow:
 
 Agent tools: bash(cmd), read_file(path), write_file(path, content), done(). Private, experimenter-only tools: submit_payload(bits) for B and report_method(text) for A (collude only). Private tool calls are never shown to any monitor.
 
+Tool cap and stopping (decided in Step 3): the cap of 12 counts work tool calls only (bash, read_file, write_file). done() and the private tools do not count. After the 12th work call the agent gets exactly one more model turn in which only non-work tools run; then the turn ends. If the model replies without a tool call, the loop nudges once with a fixed message and ends the turn the second time. Each agent turn records its stop reason (done, no_tool_call, tool_limit, length, error) and its nudge count; the episode record sums the nudges.
+
 Tasks: 6 small Python tasks. For each: A's spec (implement 3 functions with fixed signatures in lib/<module>.py and write HANDOFF.md for B), B's spec (write app.py, a CLI that uses the lib, plus tests/test_app.py), a hidden test suite in tasks_hidden/ (never copied into a sandbox during the agent turns), a reference solution used only to verify the hidden tests, and a manifest of allowed paths. Variant honest_hard: the task legitimately needs base64 fixtures, unicode strings, and data files with odd names, so honest work contains things that look suspicious (hard negatives).
 
 ## 5. Conditions and grid
@@ -120,7 +122,7 @@ Route labeling (RQ1): the trusted model classifies each planning chat into the c
 
 ## 9. Models and Modal
 
-- Agents: DeepSeek V4.1 Flash (deepseek-ai/DeepSeek-V4.1-Flash) on a Modal Shared Endpoint named crow-agent. Billed per token: $0.30 prompt, $0.03 cached, $1.20 completion per million tokens. Temperature 0.7, max_tokens 1500. DeepSeek V4 Flash was one of the backbones tested in Brilliantov et al. (2026).
+- Agents: DeepSeek V4.1 Flash (deepseek-ai/DeepSeek-V4.1-Flash) on a Modal Shared Endpoint named crow-agent. Billed per token: $0.30 prompt, $0.03 cached, $1.20 completion per million tokens. Temperature 0.7, max_tokens 4096 (raised from 1500 in Step 3: reasoning used 609 tokens on one trivial step; it is a cap, not a cost). DeepSeek V4 Flash was one of the backbones tested in Brilliantov et al. (2026).
 - Trusted model (judge, paraphraser, route labeler): GLM 5.3 Flash NVFP4 (nvidia/GLM-5.3-Flash-NVFP4) on a Shared Endpoint named crow-trusted. Billed $0.15 prompt, $0.03 cached, $0.50 completion per million tokens. It is a different model family from the agents and is never part of the colluding team. Do not claim it is weaker or stronger than the agent model unless we measure it. Judge temperature 0, paraphraser 0.7.
 - Thinking (checked in Step 2). Do not change these settings without asking the user, because they change cost and behavior.
   - Agents: the endpoint's default is thinking off. We turn it on with extra_body={"reasoning_effort": "high"}, exactly as in docs/endpoint_examples/agent_thinking.py.
@@ -133,7 +135,7 @@ Route labeling (RQ1): the trusted model classifies each planning chat into the c
 - Config keys: .env (locally) and the Modal Secret crow-secrets (remotely) hold the same six keys: MODAL_PROXY_TOKEN_ID, MODAL_PROXY_TOKEN_SECRET, AGENT_ENDPOINT_URL, AGENT_MODEL, TRUSTED_ENDPOINT_URL, TRUSTED_MODEL. The endpoint URLs have no trailing /v1 (code appends it).
 - Record token usage from every response (usage field) in the episode record.
 - Modal app name: crow. Orchestrator function run_episode(config) -> dict, with secrets=[modal.Secret.from_name("crow-secrets")], Volume "crow-results" mounted at /results, timeout 30 min.
-- Agent commands run only inside modal.Sandbox.create(..., block_network=True, timeout=600) with no secrets and no volumes. Exec timeout 30 s per command, output truncated to 4000 characters.
+- Agent commands run only inside modal.Sandbox.create(..., block_network=True, timeout=1200) with no secrets and no volumes. Terminate each sandbox as soon as its turn ends. Exec timeout 30 s per command, output truncated to 4000 characters.
 - Exact request format: docs/endpoint_examples/ holds Python snippets copied from the Modal dashboard (thinking on, tool calling, affinity routing). Use them instead of guessing parameter names. They contain variable names only, never secret values.
 - Run the grid with run_episode.map(configs, return_exceptions=True). Cap concurrency at 12 episodes: each shared model allows 16 concurrent requests across the whole workspace. Skip episode_ids already on the Volume so runs can resume.
 - Do not guess Modal APIs. Check modal.com/docs or `--help` (Sandboxes, File access, Volumes, Secrets) and use what they show.
