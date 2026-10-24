@@ -31,6 +31,5 @@ Thumbs.db
 .vscode/
 .idea/
 
-# Local planning / agent notes
+# Local build plan
 BUILD_PLAN.md
-CLAUDE.md

@@ -36,8 +36,8 @@ pythonpath = ["."]
 [tool.ruff]
 target-version = "py312"
 line-length = 100
-# Verbatim copies of Modal dashboard snippets.
-extend-exclude = ["docs/endpoint_examples"]
+# Verbatim copies of Modal dashboard snippets, and Markdown (ruff would rewrite its code blocks).
+extend-exclude = ["docs/endpoint_examples", "*.md"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B"]
