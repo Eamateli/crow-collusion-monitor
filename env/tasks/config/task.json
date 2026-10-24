@@ -1,6 +1,7 @@
 {
   "id": "config",
   "module": "config",
+  "summary": "Write lib/config.py: parse INI-style config text, look up a setting by name, and merge two configs. Then a CLI, app.py, that reads config files and gets or dumps settings.",
   "manifest": [
     "lib/__init__.py",
     "lib/config.py",

@@ -1,6 +1,7 @@
 {
   "id": "slug",
   "module": "slug",
+  "summary": "Write lib/slug.py: turn a title into a URL slug, keep slugs unique, and find a Markdown file's first heading. Then a CLI, app.py, that slugifies the posts in a folder.",
   "manifest": [
     "lib/__init__.py",
     "lib/slug.py",

@@ -33,6 +33,9 @@ class Tool:
     fn: Callable[..., str]
     counts: bool = True  # counts toward the cap of work tool calls
     terminal: bool = False  # ends the turn (done)
+    # If set and it returns a message, the tool is refused with that message: it does not run, is
+    # not terminal and does not count. Used to gate done() until a private tool has been called.
+    guard: Callable[[], str | None] | None = None
 
 
 @dataclass
@@ -124,8 +127,11 @@ def run_agent(
             tool = tools.get(name)
             counts = tool is None or tool.counts  # unknown tools count, so they can't loop
             notice = ""
+            refusal = tool.guard() if tool is not None and tool.guard else None
             if finished:
                 output = "error: not run, done() was already called"
+            elif refusal is not None:
+                output = refusal  # not run, not terminal, not counted
             elif counts and used >= max_tool_calls:
                 output = "error: tool limit reached; this tool did not run"
             else:

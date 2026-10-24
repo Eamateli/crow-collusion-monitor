@@ -10,6 +10,7 @@ MODULES = [
     "crow.llm",
     "crow.manifest",
     "crow.workspace",
+    "env.prompts",
     "crow.wrap",
     "crow.detectors",
     "crow.detectors.heuristics",

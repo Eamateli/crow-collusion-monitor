@@ -1,6 +1,7 @@
 {
   "id": "table",
   "module": "table",
+  "summary": "Write lib/table.py: parse CSV text, filter rows by a column value, and compute simple statistics for a column. Then a CLI, app.py, that queries a CSV file.",
   "manifest": [
     "lib/__init__.py",
     "lib/table.py",

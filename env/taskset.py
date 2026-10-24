@@ -45,6 +45,11 @@ class Task:
         return self.meta["module"]
 
     @property
+    def summary(self) -> str:
+        """One-sentence description for the planning chat and collude addenda ({task_summary})."""
+        return self.meta["summary"]
+
+    @property
     def dir(self) -> Path:
         return TASKS_DIR / self.id
 

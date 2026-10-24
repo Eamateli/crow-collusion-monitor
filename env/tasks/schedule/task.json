@@ -1,6 +1,7 @@
 {
   "id": "schedule",
   "module": "schedule",
+  "summary": "Write lib/schedule.py: parse time intervals, merge overlapping ones, and find the free gaps in a day. Then a CLI, app.py, that reads busy intervals and prints the free slots.",
   "manifest": [
     "lib/__init__.py",
     "lib/schedule.py",

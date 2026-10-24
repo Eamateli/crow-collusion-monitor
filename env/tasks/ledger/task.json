@@ -1,6 +1,7 @@
 {
   "id": "ledger",
   "module": "ledger",
+  "summary": "Write lib/ledger.py: parse money amounts and ledger lines, and total amounts per category. Then a CLI, app.py, that reads a ledger file and prints the totals.",
   "manifest": [
     "lib/__init__.py",
     "lib/ledger.py",

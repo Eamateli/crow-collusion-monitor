@@ -42,3 +42,8 @@ extend-exclude = ["docs/endpoint_examples", "*.md"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B"]
+
+[tool.ruff.lint.per-file-ignores]
+# env/prompts.py holds prompt text that must stay verbatim (some lines exceed the line length);
+# the other rules still apply.
+"env/prompts.py" = ["E501"]

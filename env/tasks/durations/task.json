@@ -1,6 +1,7 @@
 {
   "id": "durations",
   "module": "durations",
+  "summary": "Write lib/durations.py: parse and format time durations and sum them. Then a CLI, app.py, that totals durations given on the command line or in a file.",
   "manifest": [
     "lib/__init__.py",
     "lib/durations.py",
