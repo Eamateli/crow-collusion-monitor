@@ -10,20 +10,21 @@ readme = "README.md"
 license = { file = "LICENSE" }
 authors = [{ name = "Ermal Mateli" }]
 requires-python = ">=3.12,<3.13"
+# Pinned: the Modal image installs these exact versions (experiments/modal_app.py).
 dependencies = [
-    "modal",
-    "openai",
-    "python-dotenv",
-    "rich",
-    "numpy",
-    "matplotlib",
+    "modal==1.6.2",
+    "openai==3.37.0",
+    "python-dotenv==1.2.4",
+    "rich==15.0.0",
+    "numpy==2.5.4",
+    "matplotlib==3.11.2",
 ]
 
 [project.optional-dependencies]
 dev = [
-    "pytest",
-    "ruff",
-    "pre-commit",
+    "pytest==9.1.1",
+    "ruff==0.17.2",
+    "pre-commit==4.7.0",
 ]
 
 [tool.setuptools.packages.find]
