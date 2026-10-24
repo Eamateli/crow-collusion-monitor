@@ -1,0 +1,43 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "crow"
+version = "0.1.0"
+description = "Crow: a passive monitor for multi-agent coding harnesses"
+readme = "README.md"
+license = { file = "LICENSE" }
+authors = [{ name = "Ermal Mateli" }]
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "modal",
+    "openai",
+    "python-dotenv",
+    "rich",
+    "numpy",
+    "matplotlib",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest",
+    "ruff",
+    "pre-commit",
+]
+
+[tool.setuptools.packages.find]
+include = ["crow*", "env*", "experiments*", "analysis*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+# Verbatim copies of Modal dashboard snippets.
+extend-exclude = ["docs/endpoint_examples"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
