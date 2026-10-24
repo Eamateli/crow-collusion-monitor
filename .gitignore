@@ -1,0 +1,36 @@
+# Secrets: never commit
+.env
+.env.*
+!.env.example
+.modal.toml
+*.pem
+*.key
+
+# Claude Code personal settings
+.claude/settings.local.json
+
+# Python
+.venv/
+venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+*.egg-info/
+build/
+dist/
+
+# Raw experiment data (summaries in results/ are committed)
+results/raw/
+*.tar
+*.tar.gz
+
+# OS and editors
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Local planning / agent notes
+BUILD_PLAN.md
+CLAUDE.md
