@@ -9,6 +9,7 @@ MODULES = [
     "crow.events",
     "crow.llm",
     "crow.manifest",
+    "crow.workspace",
     "crow.wrap",
     "crow.detectors",
     "crow.detectors.heuristics",

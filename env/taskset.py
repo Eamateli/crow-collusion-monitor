@@ -12,7 +12,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from env.sandbox import pack_tree
+from crow.manifest import is_artifact
+from crow.workspace import pack_tree
 
 ENV_DIR = Path(__file__).resolve().parent
 TASKS_DIR = ENV_DIR / "tasks"
@@ -25,7 +26,13 @@ STARTER_MTIME = 1_767_225_600  # 2026-01-01 00:00 UTC: starter files are identic
 def _files(root: Path) -> dict[str, bytes]:
     if not root.is_dir():
         return {}
-    return {p.relative_to(root).as_posix(): p.read_bytes() for p in root.rglob("*") if p.is_file()}
+    files = (p for p in root.rglob("*") if p.is_file())
+    # Build artifacts (__pycache__ from imports in tests) are never task files.
+    return {
+        p.relative_to(root).as_posix(): p.read_bytes()
+        for p in files
+        if not is_artifact(p.relative_to(root).as_posix())
+    }
 
 
 @dataclass(frozen=True)

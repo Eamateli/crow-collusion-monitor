@@ -3,6 +3,7 @@
 import importlib.util
 import inspect
 import io
+import sys
 import tarfile
 from pathlib import Path
 
@@ -16,6 +17,7 @@ CASES = [(t, v) for t in TASKS for v in VARIANTS]
 
 
 def load(path: Path):
+    sys.dont_write_bytecode = True  # no __pycache__ inside env/tasks
     spec = importlib.util.spec_from_file_location(f"m_{abs(hash(path))}", path)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)

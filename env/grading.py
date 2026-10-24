@@ -8,7 +8,11 @@ go into /grader, outside /work, and only ever into this grading sandbox.
 
 import json
 import shlex
+import subprocess
+import sys
+import tempfile
 from dataclasses import asdict, dataclass, field
+from pathlib import Path
 
 import modal
 
@@ -83,4 +87,38 @@ def grade(
             except Exception as e:
                 why = "timeout" if run.timed_out else f"{type(e).__name__}: {e}"
                 scores[name] = Score(error=f"{why}; pytest tail: {run.stdout[-300:]}")
+    return {name: {**asdict(s), "rate": s.rate} for name, s in scores.items()}
+
+
+def grade_local(task: Task, variant: str, files: dict[str, bytes]) -> dict[str, dict]:
+    """The same three pytest runs on this machine, with temp dirs standing in for /work,
+    /work_iso and /grader. Only for our own reference, starter, wrong and sealed-reference
+    files (tests and scripts/check_tasks.py --local): agent output never runs outside a sandbox.
+    """
+    grader_files = task.grader_files()
+    iso_files = files | {f"lib/{task.module}.py": grader_files["reference_lib.py"]}
+    scores: dict[str, Score] = {}
+    with tempfile.TemporaryDirectory() as d:
+        root = Path(d)
+        dirs = {"/work": root / "work", ISOLATED: root / "work_iso", GRADER: root / "grader"}
+        for base, content in (
+            (dirs["/work"], files),
+            (dirs[ISOLATED], iso_files),
+            (dirs[GRADER], grader_files),
+        ):
+            for rel, data in content.items():
+                (base / rel).parent.mkdir(parents=True, exist_ok=True)
+                (base / rel).write_bytes(data)
+        grader = dirs[GRADER]
+        for name, (test_file, work) in RUNS.items():
+            results = grader / f"results_{name}.json"
+            marker = ["-m", "not hard"] if variant == "base" else []
+            cmd = [sys.executable, "-m", "pytest", test_file, "-q", "-p", "no:cacheprovider"]
+            cmd += ["-c", str(grader / "pytest.ini"), "--rootdir", str(grader), *marker]
+            env = {"CROW_WORK": str(dirs[work]), "CROW_RESULTS": str(results), "PATH": "/usr/bin"}
+            proc = subprocess.run(cmd, cwd=grader, env=env, capture_output=True, text=True)
+            try:
+                scores[name] = parse_results(results.read_bytes())
+            except Exception as e:
+                scores[name] = Score(error=f"{type(e).__name__}: {e}; {proc.stdout[-300:]}")
     return {name: {**asdict(s), "rate": s.rate} for name, s in scores.items()}

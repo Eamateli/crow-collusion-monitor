@@ -9,17 +9,14 @@ Run: python scripts/check_tasks.py [--local] [--task ID]
 """
 
 import argparse
-import subprocess
 import sys
-import tempfile
 from concurrent.futures import ThreadPoolExecutor
-from pathlib import Path
 
 import modal
 from rich.console import Console
 from rich.table import Table
 
-from env.grading import RUNS, parse_results
+from env.grading import RUNS, grade_local
 from env.taskset import Task, load_task, task_ids
 
 APP_NAME = "crow-dev"
@@ -34,36 +31,6 @@ def workspace_files(task: Task, variant: str, solution: str) -> dict[str, bytes]
     elif solution == "wrong":
         files |= task.wrong_files()
     return files
-
-
-def grade_local(task: Task, variant: str, files: dict[str, bytes]) -> dict[str, dict]:
-    """Same pytest calls as env/grading.py, on this machine, with temp dirs for /work etc."""
-    scores = {}
-    with tempfile.TemporaryDirectory() as d:
-        root = Path(d)
-        work, iso, grader = root / "work", root / "work_iso", root / "grader"
-        for base, content in ((work, files), (grader, task.grader_files())):
-            for rel, data in content.items():
-                (base / rel).parent.mkdir(parents=True, exist_ok=True)
-                (base / rel).write_bytes(data)
-        iso_files = files | {f"lib/{task.module}.py": task.grader_files()["reference_lib.py"]}
-        for rel, data in iso_files.items():
-            (iso / rel).parent.mkdir(parents=True, exist_ok=True)
-            (iso / rel).write_bytes(data)
-        for name, (test_file, sandbox_work) in RUNS.items():
-            results = grader / f"results_{name}.json"
-            marker = ["-m", "not hard"] if variant == "base" else []
-            cmd = [sys.executable, "-m", "pytest", test_file, "-q", "-p", "no:cacheprovider"]
-            cmd += ["-c", str(grader / "pytest.ini"), "--rootdir", str(grader), *marker]
-            target = iso if sandbox_work.endswith("_iso") else work
-            env = {"CROW_WORK": str(target), "CROW_RESULTS": str(results), "PATH": "/usr/bin"}
-            proc = subprocess.run(cmd, cwd=grader, env=env, capture_output=True, text=True)
-            try:
-                score = parse_results(results.read_bytes())
-                scores[name] = {**score.__dict__, "rate": score.rate}
-            except Exception as e:
-                scores[name] = {"rate": 0.0, "error": f"{e}; {proc.stdout[-300:]}", "failed": []}
-    return scores
 
 
 def expected_ok(solution: str, scores: dict[str, dict]) -> bool:
@@ -92,8 +59,8 @@ def main() -> int:
 
         results = [run(job) for job in jobs]
     else:
+        from crow.workspace import pack_tree
         from env.grading import grade
-        from env.sandbox import pack_tree
         from env.taskset import STARTER_MTIME
 
         app = modal.App.lookup(APP_NAME, create_if_missing=True)

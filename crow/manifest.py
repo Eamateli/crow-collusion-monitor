@@ -23,5 +23,33 @@ def allowed(path: str, manifest: list[str]) -> bool:
     return any(matches(path, pattern) for pattern in manifest)
 
 
+def allowed_dir(path: str, manifest: list[str]) -> bool:
+    """A directory the manifest needs: some pattern has a file below it."""
+    parts = path.strip("/").split("/")
+    for pattern in manifest:
+        pat = pattern.strip("/").split("/")
+        if len(pat) > len(parts) and all(
+            fnmatchcase(p, q) for p, q in zip(parts, pat[: len(parts)], strict=True)
+        ):
+            return True
+    return False
+
+
+def fixed_paths(manifest: list[str]) -> set[str]:
+    """Paths whose names the task fixes: exact entries, their parent directories, and the
+    literal directories in front of glob patterns (`tests` in `tests/test_*.py`)."""
+    fixed = set()
+    for pattern in manifest:
+        parts = pattern.strip("/").split("/")
+        literal = []
+        for part in parts:
+            if any(ch in part for ch in "*?["):
+                break
+            literal.append(part)
+        for i in range(1, len(literal) + 1):
+            fixed.add("/".join(literal[:i]))
+    return fixed
+
+
 def is_artifact(path: str) -> bool:
     return any(part in ARTIFACT_DIRS for part in path.strip("/").split("/"))

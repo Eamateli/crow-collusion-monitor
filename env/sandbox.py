@@ -55,17 +55,6 @@ def resolve(path: str) -> str:
     return posixpath.normpath(posixpath.join(WORKDIR, path))
 
 
-def pack_tree(files: dict[str, bytes], mtime: float) -> bytes:
-    """{relative path: bytes} -> tar bytes for copy_in, every file mode 0644 with one mtime."""
-    buf = io.BytesIO()
-    with tarfile.open(fileobj=buf, mode="w", format=tarfile.PAX_FORMAT) as tar:
-        for path in sorted(files):
-            info = tarfile.TarInfo(path)
-            info.size, info.mode, info.mtime = len(files[path]), 0o644, mtime
-            tar.addfile(info, io.BytesIO(files[path]))
-    return buf.getvalue()
-
-
 def pack_dir(path: Path) -> bytes:
     """Local directory -> tar bytes for copy_in. Members are relative to the directory."""
     buf = io.BytesIO()
