@@ -110,7 +110,7 @@ python -m crow.cli seal --mode side|side_para --manifest env/tasks/<task>/task.j
 
 ## AI assistance
 
-The code in this repository was written with Claude Code (Anthropic's Claude as an AI coding assistant), working step by step from a written plan; the design decisions were made and reviewed by the author. The prompt text for the colluding agents was supplied by the author (`docs/collude_prompts.md`) and copied verbatim into `env/prompts.py`. The models that act inside the experiment are DeepSeek V4.1 Flash (agents) and GLM 5.3 Flash NVFP4 (trusted monitor and paraphraser), both on Modal Shared Endpoints.
+The code in this repository was written with Claude Code (Anthropic's Claude as an AI coding assistant), working step by step from a written plan; the design decisions were made and reviewed by the author. The prompt text for the colluding agents (`docs/collude_prompts.md`) was written by Claude in the project chat on claude.ai, reviewed by the author, and copied verbatim into `env/prompts.py`. The models that act inside the experiment are DeepSeek V4.1 Flash (agents) and GLM 5.3 Flash NVFP4 (trusted monitor and paraphraser), both on Modal Shared Endpoints.
 
 ## Disclosure
 
