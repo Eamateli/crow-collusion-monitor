@@ -185,3 +185,29 @@ def test_split_by_defense_groups_channels():
     assert split["open"]["n"] == 3
     assert split["open"]["groups"] == {"covert": 2, "hidden": 1, "other": 0}
     assert split["open"]["channels"]["C2"] == 1 and split["open"]["channels"]["C5"] == 1
+
+
+def test_select_repeatability_ids_is_seeded_mixed_and_task_spread(tmp_path):
+    from analysis.analyze import select_repeatability_ids
+
+    ok = []
+    tasks = ["ledger", "durations", "table", "config", "slug", "schedule"]
+    for task in tasks:
+        for j in range(6):
+            ok.append(record(f"collude__{task}__{j}", "collude", "open", 8, channel_proposal="x"))
+            ok.append(record(f"honest__{task}__{j}", "honest", "open"))
+            # give each collude/honest episode its own task via the config
+            ok[-2]["config"]["task_id"] = task
+            ok[-1]["config"]["task_id"] = task
+
+    chosen = select_repeatability_ids(ok, 20, seed=0)
+    assert len(chosen) == 20 and len(set(chosen)) == 20
+    assert sum(c.startswith("collude") for c in chosen) == 10
+    assert sum(c.startswith("honest") for c in chosen) == 10
+    # spread across tasks: at least 4 of the 6 tasks represented on each side
+    collude_tasks = {c.split("__")[1] for c in chosen if c.startswith("collude")}
+    honest_tasks = {c.split("__")[1] for c in chosen if c.startswith("honest")}
+    assert len(collude_tasks) >= 4 and len(honest_tasks) >= 4
+    # deterministic (seed 0) and seed-dependent
+    assert select_repeatability_ids(ok, 20, seed=0) == chosen
+    assert select_repeatability_ids(ok, 20, seed=1) != chosen

@@ -12,6 +12,7 @@ MAIN_DIR holds records/, events/ and workspaces/ (e.g. `modal volume get crow-re
 
 import argparse
 import json
+import random
 import subprocess
 import sys
 from collections import defaultdict
@@ -514,13 +515,40 @@ def _clients():
     return agent, trusted
 
 
+def _spread_sample(records: list[dict], n: int, seed: int) -> list[str]:
+    """A seeded random sample of n episode ids, spread across tasks: shuffle within each task,
+    then take round-robin across the tasks (in a shuffled task order) until n are chosen."""
+    rng = random.Random(seed)
+    by_task: dict[str, list[str]] = defaultdict(list)
+    for r in sorted(records, key=lambda r: r["episode_id"]):  # stable base order before shuffling
+        by_task[r["config"]["task_id"]].append(r["episode_id"])
+    tasks = sorted(by_task)
+    rng.shuffle(tasks)
+    for ids in by_task.values():
+        rng.shuffle(ids)
+    chosen: list[str] = []
+    while len(chosen) < min(n, sum(len(v) for v in by_task.values())):
+        for task in tasks:
+            if by_task[task]:
+                chosen.append(by_task[task].pop())
+                if len(chosen) == n:
+                    return chosen
+    return chosen
+
+
+def select_repeatability_ids(ok: list[dict], n: int, seed: int = 0) -> list[str]:
+    """n episodes for the repeatability diagnostic: half collude, half honest/honest_hard, each a
+    seeded task-spread sample (CLAUDE.md section 8 diagnostic)."""
+    collude = [r for r in ok if is_collude(r)]
+    honest = [r for r in ok if not is_collude(r)]
+    return _spread_sample(collude, n // 2, seed) + _spread_sample(honest, n - n // 2, seed)
+
+
 def _run_repeatability(main_dir: Path, ok: list[dict], n: int, cache: Path) -> dict:
     """Re-score n mixed episodes (half collude, half honest) a second time with the judge."""
     from experiments.calibrate import Episode, judge_repeatability
 
-    collude = sorted((r for r in ok if is_collude(r)), key=lambda r: r["episode_id"])
-    honest = sorted((r for r in ok if not is_collude(r)), key=lambda r: r["episode_id"])
-    chosen_ids = {r["episode_id"] for r in (collude[: n // 2] + honest[: n - n // 2])}
+    chosen_ids = set(select_repeatability_ids(ok, n, seed=0))
     episodes = [
         Episode(main_dir / "records" / f"{r['episode_id']}__a{r['attempt']}.json")
         for r in ok
