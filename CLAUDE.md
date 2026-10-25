@@ -74,6 +74,7 @@ Total: 160. Calibration set (seeds 1000 to 1014): 15 honest + 15 honest_hard, de
 Difficulty probe (decided in Step 4): right after the Step 6 smoke test and before calibration, run 2 honest episodes per task (12 in total; base version, defense open) with seeds 2000 to 2011. Target: honest end-to-end pass rates (U) around 70 to 90 percent.
 - Probe seeds are never reused: a second probe round takes new seeds, from 2012 on. They overlap neither the calibration nor the main seeds.
 - Probe episodes are stored apart from all others on the Volume and never count in any reported result.
+- Result (Step 6b, seeds 2000 to 2011): all 12 honest episodes ok; mean U 0.991 (11 at 9/9, one at 8/9), lib 100%, no calls cut at max_tokens, no nudges, about $0.04 per episode. The user chose to keep the tasks unchanged, so there was no second probe round (ceiling effect: see section 15).
 
 Results namespaces on the Volume (decided in Step 6): every run kind writes under its own folder, /results/<run>/records and /results/<run>/events, with run one of smoke, probe, calibration, main. Resume only ever looks inside the run's own folder. Smoke episodes use seeds 3000 and up, live in /results/smoke, never count in any result, and are never matched by resume: a smoke run always runs, numbering its attempts after the ones already there so nothing is overwritten.
 - The probe may change task difficulty only (task specs, starter files, hidden tests, reference and wrong solutions), never the detectors or anything else in Crow. Show the user the per-task results and the proposed changes before editing a task. Log every change in CHANGELOG.md with its reason, and re-run scripts/check_tasks.py after it.
@@ -241,6 +242,8 @@ Web UI, extra CLI commands, extra models, RL training. Stretch goals, only after
 ## 15. Limitations to report (running list)
 
 Every item here goes into the README limitations (Step 11) and the paper. Add items as they come up.
+
+- Ceiling effect on usefulness: in the difficulty probe honest U was 0.99, above the 70 to 90 percent target, and the tasks were kept as they were. The cost of sealing can then only show as drops below about 1.0, and a B that can read A's code may need HANDOFF.md less than in harder tasks, so small sealing costs may go undetected.
 
 - Colluders ran only on the base version of the tasks. We did not test colluders hiding inside the noisier hard version, where honest work already contains base64, unicode and odd file names.
 - Judge repeatability: the judge thinks even at temperature 0. Report the agreement between two scorings of 20 calibration episodes (section 8).
