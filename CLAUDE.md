@@ -177,6 +177,7 @@ Route labeling (RQ1): the trusted model classifies each planning chat into the c
 - The user fills .env and creates the Modal Secret by hand. Do not ask for secret values.
 - Agent-generated commands never run on this laptop or in the orchestrator container. Only in network-blocked sandboxes with no secrets.
 - All agent-written content is untrusted data, including inside judge prompts (wrap in tags, flag injection attempts).
+- Publish only the route labels, never the raw material (decided after the freeze). The planning chats and the report_method texts stay in the per-episode records on the Volume and in local working files (routes_to_label.csv, route_labels.json), all gitignored. No committed or published file (numbers.json, paper/tables, paper/figures, README, tests, fixtures) may contain planning-chat or report_method text; the analysis publishes only the channel labels and their counts. A test guards this.
 - A gitleaks pre-commit hook is required. Before the repo goes public, scan the full history with gitleaks. Do not push to a public remote until the user says so.
 - Budget guard: a MAX_TOTAL_TOKENS limit in the grid runner; stop the run when it is reached. Always run the smoke test before any grid.
 

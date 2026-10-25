@@ -33,3 +33,12 @@ Thumbs.db
 
 # Local build plan
 BUILD_PLAN.md
+
+# Route labeling: never publish raw planning chats or report_method texts (CLAUDE.md section 10).
+# Only the route labels (channel codes) reach numbers.json. These working files hold chat text
+# or the model's reasoning about it, so they stay local.
+routes_to_label.csv
+*_to_label.csv
+route_labels.json
+route_kappa.json
+judge_repeatability_main.json
