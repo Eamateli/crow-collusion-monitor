@@ -304,5 +304,8 @@ def test_episode_keeps_workspaces_and_records_the_config_used(tmp_path):
     stem = f"{record['episode_id']}__a1"
     for name in ("a_out", "b_view", "final"):
         assert (tmp_path / "workspaces" / f"{stem}.{name}.tar").stat().st_size > 0
-    # no crow/frozen.json yet (before Step 8): uncalibrated default
-    assert record["frozen"] == {"tau": None, "sha256": None}
+    # the record names the config that scored it (crow/frozen.json once frozen, else the default)
+    from crow.score import load_config
+
+    config = load_config()
+    assert record["frozen"] == {"tau": config.tau, "sha256": config.sha256}

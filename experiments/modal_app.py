@@ -6,6 +6,7 @@ event log to the crow-results Volume. The grid is run with run_episode_remote.ma
 containers, skipping episodes already finished (resume) and stopping at MAX_TOTAL_TOKENS.
 """
 
+import hashlib
 import json
 import os
 import time
@@ -14,7 +15,7 @@ from pathlib import Path
 import modal
 
 from env.episode import EpisodeConfig, make_config, run_episode
-from experiments.grid import PROBE_FIRST_SEED, calibration_configs, probe_configs
+from experiments.grid import PROBE_FIRST_SEED, calibration_configs, main_configs, probe_configs
 
 ROOT = Path(__file__).resolve().parent.parent
 APP_NAME = "crow"
@@ -68,6 +69,11 @@ def run_episode_remote(payload: dict) -> dict:
     run = payload["run"]
     if run not in RUNS:
         raise ValueError(f"unknown run {run!r}")
+    if run == "main":  # frozen-config guard, inside the container (CLAUDE.md section 8)
+        from crow.score import load_config
+
+        if not load_config().frozen:
+            raise RuntimeError("main run refused: this container has no crow/frozen.json")
     started = time.time()
     record = run_episode(
         config, agent, trusted, f"{RESULTS}/{run}", app=None, attempt=payload.get("attempt", 1)
@@ -148,7 +154,8 @@ def main(
     only: str = "",
     max_tokens: int = MAX_TOTAL_TOKENS,
 ) -> None:
-    """--smoke, or --run probe [--probe-first-seed N]. --only keeps the configs whose episode_id
+    """--smoke, or --run probe [--probe-first-seed N] | calibration | main. --only keeps the
+    configs whose episode_id
     contains that text. Launch long runs with `modal run --detach` (CLAUDE.md section 9)."""
     run = "smoke" if smoke else run
     if run == "smoke":
@@ -157,8 +164,19 @@ def main(
         configs = probe_configs(probe_first_seed)
     elif run == "calibration":
         configs = calibration_configs()
+    elif run == "main":
+        # Frozen-config guard, before launch: the local file must exist and a container must see
+        # exactly it (add_local_python_source alone would not ship it; CLAUDE.md section 9).
+        if not FROZEN.exists():
+            raise SystemExit("main run refused: crow/frozen.json is missing (Step 8)")
+        local_sha = hashlib.sha256(FROZEN.read_bytes()).hexdigest()
+        info = frozen_info.remote()
+        if not info["frozen"] or info["sha256"] != local_sha:
+            raise SystemExit(f"main run refused: container sees {info}, local sha {local_sha}")
+        print(f"frozen config ok in the container: tau {info['tau']}, sha {local_sha[:12]}")
+        configs = main_configs()
     else:
-        raise SystemExit("use --smoke, --run probe or --run calibration; main comes in Step 9")
+        raise SystemExit("use --smoke or --run probe | calibration | main")
     configs = [c for c in configs if only in c.episode_id]
     jobs = to_run(configs, run)
     print(f"run {run}: {len(configs)} configs, {len(jobs)} to run, budget {max_tokens} tokens")
