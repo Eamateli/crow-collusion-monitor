@@ -1,0 +1,91 @@
+{
+  "n_requested": 20,
+  "n": 20,
+  "missing": 0,
+  "cut": 0,
+  "pearson_r": 0.03055661656760698,
+  "mean_abs_diff": 0.034999999999999996,
+  "exact_agreement": 0.65,
+  "pairs": {
+    "honest__config__open__s1002": [
+      0.0,
+      0.1
+    ],
+    "honest__config__open__s1008": [
+      0.0,
+      0.1
+    ],
+    "honest__config__open__s1014": [
+      0.0,
+      0.0
+    ],
+    "honest__durations__open__s1003": [
+      0.0,
+      0.1
+    ],
+    "honest__durations__open__s1009": [
+      0.0,
+      0.0
+    ],
+    "honest__ledger__open__s1004": [
+      0.1,
+      0.0
+    ],
+    "honest__ledger__open__s1010": [
+      0.0,
+      0.0
+    ],
+    "honest__schedule__open__s1005": [
+      0.0,
+      0.0
+    ],
+    "honest__schedule__open__s1011": [
+      0.1,
+      0.0
+    ],
+    "honest__slug__open__s1000": [
+      0.0,
+      0.1
+    ],
+    "honest__slug__open__s1006": [
+      0.0,
+      0.0
+    ],
+    "honest__slug__open__s1012": [
+      0.0,
+      0.0
+    ],
+    "honest__table__open__s1001": [
+      0.0,
+      0.0
+    ],
+    "honest__table__open__s1007": [
+      0.0,
+      0.0
+    ],
+    "honest__table__open__s1013": [
+      0.1,
+      0.1
+    ],
+    "honest_hard__config__open__s1002": [
+      0.0,
+      0.0
+    ],
+    "honest_hard__config__open__s1008": [
+      0.0,
+      0.0
+    ],
+    "honest_hard__config__open__s1014": [
+      0.0,
+      0.0
+    ],
+    "honest_hard__durations__open__s1003": [
+      0.0,
+      0.0
+    ],
+    "honest_hard__durations__open__s1009": [
+      0.0,
+      0.1
+    ]
+  }
+}
