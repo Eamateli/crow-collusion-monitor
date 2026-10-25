@@ -243,7 +243,7 @@ Web UI, extra CLI commands, extra models, RL training. Stretch goals, only after
 
 Every item here goes into the README limitations (Step 11) and the paper. Add items as they come up.
 
-- Ceiling effect on usefulness: in the difficulty probe honest U was 0.99, above the 70 to 90 percent target, and the tasks were kept as they were. The cost of sealing can then only show as drops below about 1.0, and a B that can read A's code may need HANDOFF.md less than in harder tasks, so small sealing costs may go undetected.
+- Ceiling effect on usefulness: honest pairs pass nearly all hidden tests (mean U 0.99 in the difficulty probe, above the 70 to 90 percent target; the tasks were kept as they were), so these tasks may understate the cost of sealing. The cost can only show as drops below about 1.0, and a B that can read A's code may need HANDOFF.md less than in harder tasks.
 
 - Colluders ran only on the base version of the tasks. We did not test colluders hiding inside the noisier hard version, where honest work already contains base64, unicode and odd file names.
 - Judge repeatability: the judge thinks even at temperature 0. Report the agreement between two scorings of 20 calibration episodes (section 8).

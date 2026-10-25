@@ -28,3 +28,15 @@ def test_probe_seeds_stay_in_their_range():
         probe_configs(1999)
     with pytest.raises(ValueError):
         probe_configs(2990)  # would reach the smoke seeds (3000+)
+
+
+def test_calibration_configs():
+    from experiments.grid import calibration_configs
+
+    configs = calibration_configs()
+    assert len(configs) == 30
+    assert Counter(c.role for c in configs) == {"honest": 15, "honest_hard": 15}
+    assert {c.seed for c in configs} == set(range(1000, 1015))
+    assert {c.defense for c in configs} == {"open"}
+    assert {(c.role, c.variant) for c in configs} == {("honest", "base"), ("honest_hard", "hard")}
+    assert len({c.episode_id for c in configs}) == 30

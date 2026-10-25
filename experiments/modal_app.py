@@ -14,7 +14,7 @@ from pathlib import Path
 import modal
 
 from env.episode import EpisodeConfig, make_config, run_episode
-from experiments.grid import PROBE_FIRST_SEED, probe_configs
+from experiments.grid import PROBE_FIRST_SEED, calibration_configs, probe_configs
 
 ROOT = Path(__file__).resolve().parent.parent
 APP_NAME = "crow"
@@ -35,6 +35,11 @@ image = (
     .add_local_dir(str(ROOT / "env" / "tasks_hidden"), "/root/env/tasks_hidden", copy=True)
     .add_local_python_source("crow", "env", "experiments", "analysis")
 )
+# add_local_python_source ships only .py files, so the frozen config is added explicitly once it
+# exists (after Step 8); without it the containers would score with the uncalibrated default.
+FROZEN = ROOT / "crow" / "frozen.json"
+if FROZEN.exists():
+    image = image.add_local_file(str(FROZEN), "/root/crow/frozen.json")
 
 
 def _clients():
@@ -80,6 +85,15 @@ def run_episode_remote(payload: dict) -> dict:
         "correct": (record.get("submission") or {}).get("correct"),
         "usefulness": (record.get("usefulness") or {}).get("app_e2e", {}).get("rate"),
     }
+
+
+@app.function(image=image, timeout=120)
+def frozen_info() -> dict:
+    """Which crow config a container sees (checks that frozen.json reaches the grid)."""
+    from crow.score import load_config
+
+    config = load_config()
+    return {"frozen": config.frozen, "tau": config.tau, "sha256": config.sha256}
 
 
 def _existing_attempts(run: str) -> dict[str, list[str]]:
@@ -141,8 +155,10 @@ def main(
         configs = smoke_configs()
     elif run == "probe":
         configs = probe_configs(probe_first_seed)
+    elif run == "calibration":
+        configs = calibration_configs()
     else:
-        raise SystemExit("use --smoke or --run probe; calibration and main come in Steps 8 and 9")
+        raise SystemExit("use --smoke, --run probe or --run calibration; main comes in Step 9")
     configs = [c for c in configs if only in c.episode_id]
     jobs = to_run(configs, run)
     print(f"run {run}: {len(configs)} configs, {len(jobs)} to run, budget {max_tokens} tokens")

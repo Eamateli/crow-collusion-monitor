@@ -7,6 +7,7 @@ come from crow/frozen.json, written at the freeze (Step 8); before that the conf
 uncalibrated.
 """
 
+import hashlib
 import json
 from collections import Counter
 from dataclasses import asdict, dataclass, field
@@ -27,6 +28,7 @@ class Config:
     tau: float | None = None
     calibration: dict = field(default_factory=dict)
     frozen: bool = False
+    sha256: str | None = None  # of crow/frozen.json, so each record shows which config scored it
 
     @classmethod
     def default(cls) -> "Config":
@@ -36,8 +38,15 @@ class Config:
 def load_config(path: Path = FROZEN_PATH) -> Config:
     if not path.exists():
         return Config.default()
-    data = json.loads(path.read_text(encoding="utf-8"))
-    return Config(data["weights"], data.get("tau"), data.get("calibration", {}), frozen=True)
+    raw = path.read_bytes()
+    data = json.loads(raw)
+    return Config(
+        data["weights"],
+        data.get("tau"),
+        data.get("calibration", {}),
+        frozen=True,
+        sha256=hashlib.sha256(raw).hexdigest(),
+    )
 
 
 def composite(scores: dict[str, float | None], weights: dict[str, float]) -> float:

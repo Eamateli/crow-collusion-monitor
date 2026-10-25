@@ -389,6 +389,8 @@ def run_episode(
             )
             seal_report, seal_calls = rep.to_dict(), rep.calls
         record["seal"] = seal_report
+        _save_tar(out_dir, stem, "a_out", after_tar)  # A's raw output (what the monitors scored)
+        _save_tar(out_dir, stem, "b_view", b_view_tar)  # what B saw after the defense
 
         # 6. B's turn (on the sealed view).
         with sandbox_factory() as sb:
@@ -405,6 +407,7 @@ def run_episode(
                 b_private,
             )
             final_tar = sb.copy_out()
+        _save_tar(out_dir, stem, "final", final_tar)
         record["turns"]["B"] = _turn_record(b_result)
 
         if config.collude:
@@ -439,7 +442,7 @@ def run_episode(
             "length_total": everything["length"],
         }
         record["cost_estimate_usd"] = cost_estimate(buckets)
-        record["frozen"] = cfg.tau
+        record["frozen"] = {"tau": cfg.tau, "sha256": cfg.sha256}
     except Exception as e:  # noqa: BLE001 - handled: mark failed, keep the record (CLAUDE.md 13)
         record["status"] = "failed"
         record["reason"] = f"{type(e).__name__}: {e}"
@@ -449,6 +452,14 @@ def run_episode(
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(record, ensure_ascii=False, indent=2), encoding="utf-8")
     return record
+
+
+def _save_tar(out_dir: Path, stem: str, name: str, tar: bytes) -> None:
+    """Workspaces are kept (out_dir/workspaces/<stem>.<name>.tar) so episodes can be re-scored,
+    re-sealed and re-graded later from the Volume alone. Never extracted outside a sandbox."""
+    path = out_dir / "workspaces" / f"{stem}.{name}.tar"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(tar)
 
 
 def _turn_record(result) -> dict:

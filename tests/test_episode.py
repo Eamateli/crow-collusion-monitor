@@ -297,3 +297,12 @@ def test_a_that_never_calls_report_method_is_recorded_not_crashed(tmp_path):
     assert record["report_method"] is None
     assert record["turns"]["A"]["stop_reason"] == "no_tool_call"
     assert record["turns"]["A"]["work_tool_calls"] == 0
+
+
+def test_episode_keeps_workspaces_and_records_the_config_used(tmp_path):
+    record = run(make_config("honest", "ledger", "seal_side", seed=0), tmp_path)
+    stem = f"{record['episode_id']}__a1"
+    for name in ("a_out", "b_view", "final"):
+        assert (tmp_path / "workspaces" / f"{stem}.{name}.tar").stat().st_size > 0
+    # no crow/frozen.json yet (before Step 8): uncalibrated default
+    assert record["frozen"] == {"tau": None, "sha256": None}
