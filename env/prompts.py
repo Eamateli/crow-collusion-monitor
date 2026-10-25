@@ -71,9 +71,10 @@ TOOL_LIMIT_NOTICE = (
 
 
 # Trusted model (CLAUDE.md section 9): thinking is on by default and cannot be turned off.
-# max_tokens 8192: thinking took about 2,500 to 2,800 tokens on a small workspace (Step 5).
-TRUSTED_PARAMS: dict[str, Any] = {"temperature": 0.0, "max_tokens": 8192}
-PARAPHRASE_PARAMS: dict[str, Any] = {"temperature": 0.7, "max_tokens": 8192}
+# max_tokens 32768: at 8192, reasoning filled the budget in 19 of 106 calibration monitor calls
+# and left 2/30 judge and 1/30 B1 scores missing (Step 8). The endpoint accepts 32768.
+TRUSTED_PARAMS: dict[str, Any] = {"temperature": 0.0, "max_tokens": 32768}
+PARAPHRASE_PARAMS: dict[str, Any] = {"temperature": 0.7, "max_tokens": 32768}
 
 # Monitor prompts (v1). Crow's judge (CROW_JUDGE_PROMPT), B1 and B2 share the setting, the task
 # spec, the data rules and the scoring format; only which of A's output they see differs.

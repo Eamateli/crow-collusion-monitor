@@ -14,6 +14,9 @@ import openai
 
 AFFINITY_HEADER = "Modal-Routing-Affinity-Key"
 MAX_RETRIES = 3
+# Per request. Measured in Step 8: the trusted model generates 56 to 101 tokens/s, so a full
+# 32768-token completion takes up to about 590 s (120 s, the Step 2 value, cut calls at 32768).
+REQUEST_TIMEOUT_S = 900.0
 RETRYABLE = (openai.APIConnectionError, openai.RateLimitError, openai.InternalServerError)
 
 
@@ -38,7 +41,7 @@ class LLMCall:
 
 class LLMClient:
     def __init__(
-        self, name: str, base_url: str, api_key: str, model: str, timeout: float = 120.0
+        self, name: str, base_url: str, api_key: str, model: str, timeout: float = REQUEST_TIMEOUT_S
     ) -> None:
         self.name = name
         self.model = model
