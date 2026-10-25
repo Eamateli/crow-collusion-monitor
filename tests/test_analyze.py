@@ -164,9 +164,11 @@ def test_analyze_writes_numbers_tables_and_figures(tmp_path, monkeypatch):
     use = numbers["usefulness"]
     assert use["honest|open"]["U_app_e2e"] == pytest.approx(0.9)
     assert numbers["failures"]["by_reason"] == {"RuntimeError": 1}
+    assert numbers["failures"]["n_failed_records"] == 1
+    assert numbers["failures"]["grid_diagnosis"] is None  # synthetic ids, not the grid
 
     assert numbers["routes"] == {"pending": "run with --label-routes"}
-    assert numbers["repeatability"]["pending"]
+    assert numbers["repeatability"]["source"] == "calibration (Step 8)"  # fallback
     for name in ["detection.md", "capacity.md", "success.md", "usefulness.md", "failures.md"]:
         assert (tmp_path / "tables" / name).read_text().startswith("|")
     for name in ["roc", "capacity_vs_k", "safety_vs_usefulness"]:
