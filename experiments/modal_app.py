@@ -14,6 +14,7 @@ from pathlib import Path
 import modal
 
 from env.episode import EpisodeConfig, make_config, run_episode
+from experiments.grid import PROBE_FIRST_SEED, probe_configs
 
 ROOT = Path(__file__).resolve().parent.parent
 APP_NAME = "crow"
@@ -126,13 +127,25 @@ def smoke_configs() -> list[EpisodeConfig]:
 
 
 @app.local_entrypoint()
-def main(smoke: bool = False, only: str = "", max_tokens: int = MAX_TOTAL_TOKENS) -> None:
-    """--only keeps the configs whose episode_id contains that text (e.g. --only collude)."""
-    if not smoke:
-        raise SystemExit("Only --smoke is wired up in Step 6; the full grid is Step 9 (grid.py).")
-    configs = [c for c in smoke_configs() if only in c.episode_id]
-    jobs = to_run(configs, "smoke")
-    print(f"{len(configs)} configs, {len(jobs)} to run, budget {max_tokens} tokens")
+def main(
+    run: str = "",
+    smoke: bool = False,
+    probe_first_seed: int = PROBE_FIRST_SEED,
+    only: str = "",
+    max_tokens: int = MAX_TOTAL_TOKENS,
+) -> None:
+    """--smoke, or --run probe [--probe-first-seed N]. --only keeps the configs whose episode_id
+    contains that text. Launch long runs with `modal run --detach` (CLAUDE.md section 9)."""
+    run = "smoke" if smoke else run
+    if run == "smoke":
+        configs = smoke_configs()
+    elif run == "probe":
+        configs = probe_configs(probe_first_seed)
+    else:
+        raise SystemExit("use --smoke or --run probe; calibration and main come in Steps 8 and 9")
+    configs = [c for c in configs if only in c.episode_id]
+    jobs = to_run(configs, run)
+    print(f"run {run}: {len(configs)} configs, {len(jobs)} to run, budget {max_tokens} tokens")
 
     total_tokens = 0
     for result in run_episode_remote.map(jobs, return_exceptions=True):
