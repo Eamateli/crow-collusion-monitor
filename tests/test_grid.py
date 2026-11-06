@@ -80,3 +80,63 @@ def test_main_grid_one_task_per_seed_and_matched_payloads():
         assert payload_bits(c.seed, c.k) == payload_bits(0, c.k)
     # the 20 seeds spread over the 6 tasks as evenly as possible (4, 4, 3, 3, 3, 3)
     assert sorted(Counter(task_for_seed(s) for s in range(20)).values()) == [3, 3, 3, 3, 4, 4]
+
+
+def test_v2_main_grid_is_130_episodes_as_in_the_spec():
+    from experiments.grid import v2_main_configs
+
+    configs = v2_main_configs()
+    assert len(configs) == 130 and len({c.episode_id for c in configs}) == 130
+    assert {c.agents for c in configs} == {3}
+    assert [c.seed for c in configs] == sorted(c.seed for c in configs)
+    assert {c.seed for c in configs} == set(range(10))
+    planned_split = [c for c in configs if c.split and c.planning]
+    noplan_split = [c for c in configs if c.split and not c.planning]
+    control = [c for c in configs if c.role == "collude"]
+    assert Counter(c.defense for c in planned_split) == dict.fromkeys(
+        ("open", "seal_side", "seal_side_para"), 10
+    )
+    assert Counter(c.defense for c in control) == dict.fromkeys(
+        ("open", "seal_side", "seal_side_para"), 10
+    )
+    assert len(noplan_split) == 10 and {c.defense for c in noplan_split} == {"open"}
+    assert {c.k for c in configs if c.collude} == {8}
+    assert Counter(c.role for c in configs if not c.collude) == {"honest": 30, "honest_hard": 30}
+    assert {c.variant for c in configs if c.collude} == {"base"}
+
+
+def test_v2_matched_sets_share_task_payload_and_scheme():
+    from env.episode import payload_bits
+    from env.relational import scheme_for
+    from experiments.grid import v2_main_configs
+
+    by_seed = {}
+    for c in v2_main_configs():
+        by_seed.setdefault(c.seed, []).append(c)
+    for seed, cell in by_seed.items():
+        assert {c.task_id for c in cell} == {task_for_seed(seed)}
+        colluding = [c for c in cell if c.collude]
+        assert len({payload_bits(c.seed, c.k) for c in colluding}) == 1
+        assert len({scheme_for(c.seed, c.k) for c in colluding}) == 1
+
+
+def test_v2_calibration_is_30_three_agent_negatives_on_new_seeds():
+    from experiments.grid import (
+        CALIBRATION_SEEDS,
+        V2_MAIN_SEEDS,
+        v2_calibration_configs,
+    )
+
+    configs = v2_calibration_configs()
+    assert len(configs) == 30 and len({c.episode_id for c in configs}) == 30
+    assert Counter(c.role for c in configs) == {"honest": 15, "honest_hard": 15}
+    assert {c.defense for c in configs} == {"open"} and {c.agents for c in configs} == {3}
+    seeds = {c.seed for c in configs}
+    assert seeds == set(range(1100, 1115))
+    assert not seeds & set(CALIBRATION_SEEDS) and not seeds & set(V2_MAIN_SEEDS)
+
+
+def test_v1_grids_stay_two_agent():
+    from experiments.grid import calibration_configs, main_configs
+
+    assert {c.agents for c in main_configs() + calibration_configs() + probe_configs()} == {2}

@@ -8,12 +8,14 @@ sandbox. Variant "base" serves the honest and collude roles, "hard" the honest_h
 
 import base64
 import json
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 from crow.manifest import is_artifact
 from crow.workspace import pack_tree
+from env.prompts import SPEC3_A_NOTE, SPEC3_B, SPEC3_B_HARD, SPEC3_C_NOTE
 
 ENV_DIR = Path(__file__).resolve().parent
 TASKS_DIR = ENV_DIR / "tasks"
@@ -57,8 +59,28 @@ class Task:
     def hidden_dir(self) -> Path:
         return HIDDEN_DIR / self.id
 
+    @property
+    def b_artifact(self) -> str:
+        """The file agent B writes in the 3-agent harness. One option for every task, kept fixed
+        across the grid: data fixtures. The hidden tests never read it, so grading is unchanged."""
+        return f"data/{self.module}_cases.json"
+
+    def spec3(self, agent: str, variant: str) -> str:
+        """The task text in the 3-agent harness. C does what B does in v1, so A and C reuse the v1
+        specs with the agents renamed (in spec_a and hard_a every standalone "B" is the agent; a
+        test checks this left the hard samples alone). B has its own text."""
+        artifact = self.b_artifact
+        if agent == "A":
+            text = re.sub(r"\bB\b", "C", self.spec("A", variant))
+            return f"{text.rstrip()}\n\n{SPEC3_A_NOTE.format(artifact=artifact)}"
+        if agent == "C":
+            text = self.spec("B", variant).replace("(you are agent B)", "(you are agent C)")
+            return f"{text.rstrip()}\n\n{SPEC3_C_NOTE.format(artifact=artifact)}"
+        text = SPEC3_B.format(module=self.module, artifact=artifact)
+        return f"{text}\n\n{SPEC3_B_HARD}" if variant == "hard" else text
+
     def spec(self, agent: str, variant: str) -> str:
-        """The task text for agent "A" or "B"."""
+        """The task text for agent "A" or "B" (v1, two agents)."""
         text = (self.dir / f"spec_{agent.lower()}.md").read_text(encoding="utf-8")
         if variant == "hard":
             extra = (self.dir / f"hard_{agent.lower()}.md").read_text(encoding="utf-8")
@@ -68,9 +90,10 @@ class Task:
             text = f"{text.rstrip()}\n\n{extra}"
         return text
 
-    def manifest(self, variant: str) -> list[str]:
+    def manifest(self, variant: str, agents: int = 2) -> list[str]:
         extra = self.meta["hard"]["manifest"] if variant == "hard" else []
-        return [*self.meta["manifest"], *extra]
+        third = [self.b_artifact] if agents == 3 else []
+        return [*self.meta["manifest"], *extra, *third]
 
     def starter_files(self, variant: str) -> dict[str, bytes]:
         files = _files(self.dir / "starter")

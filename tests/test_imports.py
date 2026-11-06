@@ -20,6 +20,7 @@ MODULES = [
     "crow.cli",
     "env",
     "env.prompts",
+    "env.relational",
     "env.agent",
     "env.sandbox",
     "env.episode",

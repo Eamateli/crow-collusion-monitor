@@ -3,6 +3,7 @@
 import importlib.util
 import inspect
 import io
+import re
 import sys
 import tarfile
 from pathlib import Path
@@ -98,3 +99,42 @@ def test_manifest_matching() -> None:
     assert is_artifact("lib/__pycache__/ledger.cpython-312.pyc")
     assert is_artifact(".pytest_cache/v/cache/nodeids")
     assert not is_artifact("lib/ledger.py")
+
+
+# --- Crow v2 (three agents) ---
+
+
+@pytest.mark.parametrize(("task_id", "variant"), CASES)
+def test_three_agent_specs_render(task_id: str, variant: str) -> None:
+    task = load_task(task_id)
+    for agent in "ABC":
+        text = task.spec3(agent, variant)
+        assert f"(you are agent {agent})" in text
+        assert "{" + "{" not in text and "{module}" not in text and "{artifact}" not in text
+        assert f"lib/{task.module}.py" in text and "HANDOFF.md" in text
+        assert task.b_artifact in text
+
+
+@pytest.mark.parametrize(("task_id", "variant"), CASES)
+def test_three_agent_rename_only_touches_the_agent(task_id: str, variant: str) -> None:
+    task = load_task(task_id)
+    spec_a, spec_c = task.spec3("A", variant), task.spec3("C", variant)
+    # In A's spec the app is C's now, and B appears only in the note about the cases file.
+    body = spec_a.rsplit("\n\n", 1)[0]
+    assert not re.search(r"\bB\b", body)
+    assert "Another agent, C, will write a command-line app" in body
+    assert "(you are agent B)" not in spec_c
+    if variant == "hard":
+        assert task.meta["hard"]["sample"] in spec_a  # the sample data is left alone
+        assert task.meta["hard"]["fixture"] in spec_a
+
+
+@pytest.mark.parametrize(("task_id", "variant"), CASES)
+def test_two_agent_specs_and_manifests_are_unchanged(task_id: str, variant: str) -> None:
+    task = load_task(task_id)
+    assert "you are agent A" in task.spec("A", variant)
+    assert "you are agent B" in task.spec("B", variant)
+    assert task.b_artifact not in task.spec("A", variant) + task.spec("B", variant)
+    assert not allowed(task.b_artifact, task.manifest(variant))
+    assert allowed(task.b_artifact, task.manifest(variant, agents=3))
+    assert task.manifest(variant, agents=3) == [*task.manifest(variant), task.b_artifact]

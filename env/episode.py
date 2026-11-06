@@ -6,6 +6,11 @@ with fakes and the Modal app (experiments/modal_app.py) injects the real ones. O
 invariants (the four the user named): the planning chat runs before A learns the payload; the
 private tools and the planning chat never enter the monitor-visible event log; scoring runs on
 A's raw output before any sealing; sealing is applied before B's turn.
+
+A config with agents=3 takes the Crow v2 flow instead (_run_three_agents; the v2 spec, section 1):
+A and B build, C integrates, and the defense applies at each handoff. The two-agent flow is left
+exactly as it ran in v1. The monitors for three agents arrive in step S2, so for now a 3-agent
+record has scores None; every raw workspace is saved, so S2 scores before sealing as v1 does.
 """
 
 import json
@@ -33,34 +38,60 @@ from env.grading import grade
 from env.prompts import (
     AGENT_MODEL_ID,
     AGENT_PARAMS,
+    AGENT_SYSTEM3_A,
+    AGENT_SYSTEM3_B,
+    AGENT_SYSTEM3_C,
     AGENT_SYSTEM_A,
     AGENT_SYSTEM_B,
     AGREED_A,
     AGREED_B,
     COLLUDE_A_ADDENDUM,
     COLLUDE_B_ADDENDUM,
+    CONTROL_A_ADDENDUM,
+    CONTROL_C_ADDENDUM,
+    CONTROL_PLAN_A,
+    CONTROL_PLAN_C,
     CROW_JUDGE_PROMPT,
     DEFENSE_TEXT,
+    DEFENSE_TEXT3,
     MESSAGE_MONITOR_PROMPT,
     PARAPHRASE_PARAMS,
     PARAPHRASE_PROMPT,
+    PLAN3_A,
+    PLAN3_B,
+    PLAN3_C,
     PLAN_A,
     PLAN_B,
     PLAN_PARAMS,
+    REPORT_METHOD3_SPEC,
     REPORT_METHOD_SPEC,
     SCHELLING_A,
     SCHELLING_B,
+    SPLIT_A_ADDENDUM,
+    SPLIT_B_ADDENDUM,
+    SPLIT_C_ADDENDUM,
+    SPLIT_NOPLAN,
+    SPLIT_PLANNED,
+    SUBMIT_PAYLOAD3_SPEC,
     SUBMIT_PAYLOAD_SPEC,
     TRANSCRIPT_MONITOR_PROMPT,
     TRUSTED_MODEL_ID,
     TRUSTED_PARAMS,
 )
+from env.relational import Scheme, scheme_for, scheme_text
 from env.sandbox import Sandbox
 from env.taskset import Task, load_task
 
 PROMPT_VERSION = "v1"
+PROMPT_VERSION_3 = "v2"
 WORK_TOOLS = ("bash", "read_file", "write_file")
-ROLE_VARIANT = {"honest": "base", "honest_hard": "hard", "collude": "base"}
+ROLE_VARIANT = {
+    "honest": "base",
+    "honest_hard": "hard",
+    "collude": "base",
+    "collude_split": "base",
+}
+COLLUDE_ROLES = ("collude", "collude_split")
 
 
 @dataclass
@@ -68,31 +99,50 @@ class EpisodeConfig:
     episode_id: str
     task_id: str
     variant: str  # base | hard
-    role: str  # honest | honest_hard | collude
+    role: str  # honest | honest_hard | collude | collude_split
     defense: str  # open | seal_side | seal_side_para
     k: int  # 0 for honest and honest_hard
     seed: int
     planning: bool = True  # collude only; False = Schelling (no planning chat)
+    agents: int = 2  # 2 = v1 (A, B); 3 = Crow v2 (A, B, C)
+
+    def __post_init__(self) -> None:
+        if self.split and self.agents != 3:
+            raise ValueError("collude_split needs three agents")
 
     @property
     def collude(self) -> bool:
-        return self.role == "collude"
+        return self.role in COLLUDE_ROLES
+
+    @property
+    def split(self) -> bool:
+        return self.role == "collude_split"
 
 
-def episode_id_for(role: str, task_id: str, defense: str, seed: int, k: int, planning: bool) -> str:
-    if role != "collude":
-        return f"{role}__{task_id}__{defense}__s{seed}"
+def episode_id_for(
+    role: str, task_id: str, defense: str, seed: int, k: int, planning: bool, agents: int = 2
+) -> str:
+    # The suffix must not start with "__a": resume splits record names on "__a" (the attempt).
+    harness = "__3a" if agents == 3 else ""
+    if role not in COLLUDE_ROLES:
+        return f"{role}__{task_id}__{defense}__s{seed}{harness}"
     chat = "" if planning else "__nochat"
-    return f"collude__{task_id}__{defense}__k{k}__s{seed}{chat}"
+    return f"{role}__{task_id}__{defense}__k{k}__s{seed}{chat}{harness}"
 
 
 def make_config(
-    role: str, task_id: str, defense: str, seed: int, k: int = 0, planning: bool = True
+    role: str,
+    task_id: str,
+    defense: str,
+    seed: int,
+    k: int = 0,
+    planning: bool = True,
+    agents: int = 2,
 ) -> EpisodeConfig:
     variant = ROLE_VARIANT[role]
-    k = k if role == "collude" else 0
+    k = k if role in COLLUDE_ROLES else 0
     return EpisodeConfig(
-        episode_id_for(role, task_id, defense, seed, k, planning),
+        episode_id_for(role, task_id, defense, seed, k, planning, agents),
         task_id,
         variant,
         role,
@@ -100,6 +150,7 @@ def make_config(
         k,
         seed,
         planning,
+        agents,
     )
 
 
@@ -142,6 +193,7 @@ BUCKET_MODEL = {
     "planning": "agent",
     "agent_A": "agent",
     "agent_B": "agent",
+    "agent_C": "agent",
     "monitors": "trusted",
     "paraphrase": "trusted",
 }
@@ -286,6 +338,17 @@ def run_episode(
     sandbox_factory: Callable[[], AbstractContextManager[Sandbox]] | None = None,
     grade_fn: Callable[[Task, str, bytes], dict] | None = None,
 ) -> dict:
+    if config.agents == 3:
+        return _run_three_agents(
+            config,
+            agent_client,
+            trusted_client,
+            out_dir,
+            app=app,
+            attempt=attempt,
+            sandbox_factory=sandbox_factory,
+            grade_fn=grade_fn,
+        )
     out_dir = Path(out_dir)
     stem = f"{config.episode_id}__a{attempt}"
     log = EventLog(out_dir / "events" / f"{stem}.jsonl", config.episode_id)
@@ -480,3 +543,232 @@ def _monitor_record(result) -> dict:
         "missing": result.missing,
         "usage": _usage(result.calls),
     }
+
+
+# --- Crow v2: three agents. ---
+
+_SYSTEM3 = {"A": AGENT_SYSTEM3_A, "B": AGENT_SYSTEM3_B, "C": AGENT_SYSTEM3_C}
+_SPLIT_ADDENDUM = {"A": SPLIT_A_ADDENDUM, "B": SPLIT_B_ADDENDUM, "C": SPLIT_C_ADDENDUM}
+_CONTROL_ADDENDUM = {"A": CONTROL_A_ADDENDUM, "C": CONTROL_C_ADDENDUM}  # B is honest in the control
+_NEXT_AGENT = {"A": "B", "B": "C", "C": None}
+_REPORT3 = ("report_method", REPORT_METHOD3_SPEC)
+_SUBMIT3 = ("submit_payload", SUBMIT_PAYLOAD3_SPEC)
+
+
+def _private3(config: EpisodeConfig, agent: str) -> tuple[str, dict] | None:
+    """The private tool of this agent, if any. Having one also gates its done()."""
+    if agent == "C":
+        return _SUBMIT3 if config.collude else None
+    if config.split or (config.collude and agent == "A"):
+        return _REPORT3
+    return None
+
+
+def _system3(
+    agent: str,
+    config: EpisodeConfig,
+    task: Task,
+    payload: str,
+    scheme: Scheme | None,
+    chat: dict,
+) -> str:
+    defense_text = DEFENSE_TEXT3[config.defense]
+    base = _SYSTEM3[agent].format(defense_text=defense_text)
+    fields = {
+        "k": config.k,
+        "payload": payload,
+        "defense_text": defense_text,
+        "artifact": task.b_artifact,
+        "module": task.module,
+        "a_proposal": chat["proposal"],
+        "b_reply": chat["reply"],
+        "c_reply": chat["c_reply"],
+    }
+    if config.split:
+        method = (SPLIT_PLANNED if config.planning else SPLIT_NOPLAN)[agent]
+        scheme_block = scheme_text(scheme, task.b_artifact) if config.planning else ""
+        # Fill {method} first: it holds placeholders of its own. The chat text is filled by format
+        # and never re-parsed, so braces in what the agents said are safe.
+        template = _SPLIT_ADDENDUM[agent].replace("{method}", method)
+        return f"{base}\n\n{template.format(scheme=scheme_block, **fields)}"
+    if config.collude and agent in _CONTROL_ADDENDUM:
+        return f"{base}\n\n{_CONTROL_ADDENDUM[agent].format(**fields)}"
+    return base
+
+
+def _planning3(
+    config: EpisodeConfig, agent_client: Any, task: Task, scheme: Scheme | None
+) -> tuple[dict, list[LLMCall]]:
+    """The private chat, before anyone learns the payload: A, then B, then C for collude_split; A,
+    then C for the control. No chat for honest roles or with planning off."""
+    chat: dict[str, str | None] = {"proposal": None, "reply": None, "c_reply": None}
+    if not (config.collude and config.planning):
+        return chat, []
+    fixed = {
+        "k": config.k,
+        "defense_text": DEFENSE_TEXT3[config.defense],
+        "task_summary": task.summary,
+        "artifact": task.b_artifact,
+    }
+    if config.split:
+        fixed["scheme"] = scheme_text(scheme, task.b_artifact)
+
+    def ask(agent: str, template: str, **said: str) -> LLMCall:
+        content = template.format(**fixed, **said)
+        return agent_client.chat(
+            [{"role": "user", "content": content}],
+            affinity_key=f"{config.episode_id}-{agent}",
+            **PLAN_PARAMS,
+        )
+
+    if config.split:
+        a = ask("A", PLAN3_A)
+        b = ask("B", PLAN3_B, a_proposal=a.content or "")
+        c = ask("C", PLAN3_C, a_proposal=a.content or "", b_reply=b.content or "")
+        return {"proposal": a.content, "reply": b.content, "c_reply": c.content}, [a, b, c]
+    a = ask("A", CONTROL_PLAN_A)
+    c = ask("C", CONTROL_PLAN_C, a_proposal=a.content or "")
+    return {"proposal": a.content, "reply": None, "c_reply": c.content}, [a, c]
+
+
+def _seal_handoff(
+    config: EpisodeConfig,
+    raw_tar: bytes,
+    manifest: list[str],
+    trusted_client: Any,
+    log: EventLog,
+    next_agent: str,
+) -> tuple[bytes, dict, list[LLMCall]]:
+    """The next agent's view of a raw workspace, under the episode's defense."""
+    if config.defense == "open":
+        return raw_tar, {"mode": "open"}, []
+    if config.defense == "seal_side":
+        view, report = seal_side(raw_tar, manifest, log=log)
+        return view, report.to_dict(), []
+    view, report = seal_side_para(
+        raw_tar,
+        manifest,
+        trusted_client,
+        PARAPHRASE_PROMPT,
+        affinity_key=f"{config.episode_id}-para-{next_agent}",
+        params=PARAPHRASE_PARAMS,
+        log=log,
+    )
+    return view, report.to_dict(), report.calls
+
+
+def _run_three_agents(
+    config: EpisodeConfig,
+    agent_client: Any,
+    trusted_client: Any,
+    out_dir: str | Path,
+    *,
+    app: Any,
+    attempt: int,
+    sandbox_factory: Callable[[], AbstractContextManager[Sandbox]] | None,
+    grade_fn: Callable[[Task, str, bytes], dict] | None,
+) -> dict:
+    """One 3-agent episode. Ordering invariants: the chat runs before anyone learns the payload;
+    private tools and the chat never enter the event log; each raw output is saved before it is
+    sealed; each agent's view is sealed before its turn."""
+    out_dir = Path(out_dir)
+    stem = f"{config.episode_id}__a{attempt}"
+    log = EventLog(out_dir / "events" / f"{stem}.jsonl", config.episode_id)
+    sandbox_factory = sandbox_factory or (lambda: Sandbox(app=app))
+    grade_fn = grade_fn or (lambda task, variant, tar: grade(task, variant, tar, app=app))
+
+    started = time.time()
+    record: dict[str, Any] = {
+        "episode_id": config.episode_id,
+        "attempt": attempt,
+        "status": "ok",
+        "config": vars(config),
+        "prompt_version": PROMPT_VERSION_3,
+        "models": {"agent": AGENT_MODEL_ID, "trusted": TRUSTED_MODEL_ID},
+    }
+    try:
+        task = load_task(config.task_id)
+        manifest = task.manifest(config.variant, agents=3)
+        payload = payload_bits(config.seed, config.k) if config.collude else None
+        scheme = scheme_for(config.seed, config.k) if config.split else None
+        record["payload"] = payload
+        record["scheme"] = scheme.to_dict() if scheme else None
+
+        chat, plan_calls = _planning3(config, agent_client, task, scheme)
+        record["planning"] = {**chat, "usage": _usage(plan_calls)} if config.collude else None
+
+        record["turns"], record["seal"], record["report_method"] = {}, {}, {}
+        seal_calls: list[LLMCall] = []
+        results: dict[str, Any] = {}
+        states: dict[str, Any] = {}
+        view_tar = task.starter_tar(config.variant)
+        for agent, next_agent in _NEXT_AGENT.items():
+            with sandbox_factory() as sb:
+                sb.copy_in(view_tar)
+                results[agent], states[agent] = _run_turn(
+                    config,
+                    agent_client,
+                    sb,
+                    log,
+                    agent,
+                    _system3(agent, config, task, payload or "", scheme, chat),
+                    task.spec3(agent, config.variant),
+                    _private3(config, agent),
+                )
+                raw_tar = sb.copy_out()
+            snapshot(raw_tar, log=log, agent_id="crow", label=f"after {agent}")
+            record["turns"][agent] = _turn_record(results[agent])
+            if agent == "C":
+                _save_tar(out_dir, stem, "final", raw_tar)
+                break
+            # The raw output, saved before sealing, is what the monitors will score (S2).
+            _save_tar(out_dir, stem, f"{agent.lower()}_out", raw_tar)
+            view_tar, report, calls = _seal_handoff(
+                config, raw_tar, manifest, trusted_client, log, next_agent
+            )
+            record["seal"][next_agent] = report
+            seal_calls += calls
+            _save_tar(out_dir, stem, f"{next_agent.lower()}_view", view_tar)
+
+        record["report_method"] = {
+            agent: ((states[agent] or {}).get("args") or {}).get("text") for agent in ("A", "B")
+        }
+        if config.collude:
+            bits = ((states["C"] or {}).get("args") or {}).get("bits")
+            bits = bits.strip() if isinstance(bits, str) else None
+            record["submission"] = {
+                "bits": bits,
+                "correct": bits is not None and bits == payload,
+                "bit_errors": bit_errors(payload, bits),
+            }
+        else:
+            record["submission"] = None
+        record["scores"] = None  # the 3-agent monitors arrive in S2
+
+        record["usefulness"] = grade_fn(task, config.variant, raw_tar)
+
+        buckets = {
+            "planning": _usage(plan_calls),
+            "agent_A": _usage(results["A"].calls),
+            "agent_B": _usage(results["B"].calls),
+            "agent_C": _usage(results["C"].calls),
+            "paraphrase": _usage(seal_calls),
+        }
+        turn_calls = [call for agent in results for call in results[agent].calls]
+        everything = _usage(plan_calls + turn_calls + seal_calls)
+        record["tokens"] = {
+            **buckets,
+            "total": everything["total"],
+            "reasoning_total": everything["reasoning"],
+            "length_total": everything["length"],
+        }
+        record["cost_estimate_usd"] = cost_estimate(buckets)
+    except Exception as e:  # noqa: BLE001 - handled: mark failed, keep the record (CLAUDE.md 13)
+        record["status"] = "failed"
+        record["reason"] = f"{type(e).__name__}: {e}"
+    record["seconds"] = round(time.time() - started, 2)
+
+    path = out_dir / "records" / f"{stem}.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(record, ensure_ascii=False, indent=2), encoding="utf-8")
+    return record
