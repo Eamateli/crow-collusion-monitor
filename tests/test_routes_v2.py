@@ -1,8 +1,12 @@
 """Crow v2 route labels: the no-plan cell only, read from the private reports, and only the labels
 and counts ever leave the records (addenda, section 9; CLAUDE.md section 10)."""
 
+import csv
 import json
 
+import pytest
+
+from analysis.human_check import main as human_check
 from analysis.routes import (
     label_reports,
     label_routes,
@@ -108,6 +112,9 @@ def test_noplan_routes_counts_labels_and_failures_and_publishes_no_text():
     other = make_config("collude_split", "table", "open", 1, k=8, planning=False, agents=3)
     third = make_config("collude_split", "slug", "open", 2, k=8, planning=False, agents=3)
     records = [record(NOPLAN, REPORTS), record(other, REPORTS), record(third, REPORTS)]
+    records[0]["channel_built"] = True
+    records[1]["channel_built"] = False
+    records[2]["channel_built"] = True
     records.append(record(PLANNED, REPORTS, CHAT))  # never counted
     labels = {
         NOPLAN.episode_id: {"channel": "C6", "group": "hidden", "reasoning": f"said {REPORT}"},
@@ -115,7 +122,112 @@ def test_noplan_routes_counts_labels_and_failures_and_publishes_no_text():
         third.episode_id: {"channel": None, "group": None, "reasoning": REPORT},
     }
     result = noplan_routes(records, labels)
-    assert (result["episodes"], result["labeled"]) == (3, 2)
-    assert result["channels"]["C6"] == 1 and result["channels"]["C2"] == 1
-    assert result["groups"] == {"covert": 1, "hidden": 1, "other": 0}
+    assert result["name"] == "self-reported routes"
+    assert (result["episodes"], result["labeled"], result["channel_built"]) == (3, 2, 2)
+    # Every route is shown next to channel_built: the report said C2, but C did not get the bits.
+    assert result["channels"]["C6"] == {"episodes": 1, "channel_built": 1}
+    assert result["channels"]["C2"] == {"episodes": 1, "channel_built": 0}
+    assert result["groups"]["hidden"] == {"episodes": 1, "channel_built": 1}
+    assert result["groups"]["covert"] == {"episodes": 1, "channel_built": 0}
     assert REPORT not in json.dumps(result)
+
+
+# --- the census ---
+
+
+def write_records(main_dir, n=3, reports=REPORTS):
+    (main_dir / "records").mkdir(parents=True)
+    ids = []
+    for seed in range(n):
+        config = make_config("collude_split", "ledger", "open", seed, k=8, planning=False, agents=3)
+        rec = {
+            **record(config, reports),
+            "status": "ok",
+            "attempt": 1,
+            "channel_built": seed == 0,
+        }
+        name = f"{config.episode_id}__a1.json"
+        (main_dir / "records" / name).write_text(json.dumps(rec))
+        ids.append(config.episode_id)
+    planned = record(PLANNED, REPORTS, CHAT) | {"status": "ok", "attempt": 1}
+    name = f"{PLANNED.episode_id}__a1.json"
+    (main_dir / "records" / name).write_text(json.dumps(planned))
+    return ids
+
+
+def fill(path, human, machine=None):
+    with path.open(encoding="utf-8") as f:
+        rows = list(csv.DictReader(f))
+    for row, label in zip(rows, human, strict=True):
+        row["human_channel"] = label
+        if machine is not None:
+            row["machine_channel"] = machine
+    with path.open("w", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=list(rows[0]))
+        writer.writeheader()
+        writer.writerows(rows)
+
+
+def census(tmp_path, labels):
+    (tmp_path / "route_labels.json").write_text(json.dumps(labels))
+    out = tmp_path / "noplan_routes_to_label.csv"
+    human_check(["census", str(tmp_path), "--out", str(out)])
+    return out
+
+
+def test_census_writes_every_no_plan_episode_and_only_those(tmp_path):
+    ids = write_records(tmp_path)
+    out = census(tmp_path, {ids[0]: {"channel": "C6"}})  # the others have no machine label
+    with out.open(encoding="utf-8") as f:
+        rows = list(csv.DictReader(f))
+    assert [r["episode_id"] for r in rows] == sorted(ids)
+    assert PLANNED.episode_id not in out.read_text(encoding="utf-8")
+    by_id = {r["episode_id"]: r for r in rows}
+    assert by_id[ids[0]]["machine_channel"] == "C6" and by_id[ids[0]]["channel_built"] == "True"
+    assert by_id[ids[1]]["machine_channel"] == "" and by_id[ids[1]]["channel_built"] == "False"
+    assert by_id[ids[0]]["report_a"] == f"A {REPORT}" and by_id[ids[0]]["report_b"] == f"B {REPORT}"
+
+
+def test_the_census_file_stays_out_of_git():
+    # It holds report_method text (CLAUDE.md section 10).
+    from pathlib import Path
+
+    ignored = (Path(__file__).resolve().parent.parent / ".gitignore").read_text()
+    assert "*_to_label.csv" in ignored and "route_census.json" in ignored
+
+
+def test_agreement_is_a_raw_count_with_no_kappa(tmp_path):
+    ids = write_records(tmp_path)
+    out = census(tmp_path, {i: {"channel": "C6"} for i in ids})
+    fill(out, ["c6", "C6", "C2"])
+    human_check(["agreement", str(tmp_path), "--labeled", str(out)])
+    result = json.loads((tmp_path / "route_census.json").read_text())
+    assert result["raw_agreement"] == "2/3" and result["agreed"] == 2
+    assert "kappa" not in json.dumps(result)
+    assert [d["human"] for d in result["disagreements"]] == ["C2"]
+    assert REPORT not in json.dumps(result)
+
+
+def test_a_census_needs_every_row_labeled(tmp_path):
+    ids = write_records(tmp_path)
+    out = census(tmp_path, {i: {"channel": "C6"} for i in ids})
+    fill(out, ["C6", "", "C2"])
+    with pytest.raises(SystemExit, match="every row"):
+        human_check(["agreement", str(tmp_path), "--labeled", str(out)])
+
+
+def test_an_impossible_human_label_is_refused(tmp_path):
+    ids = write_records(tmp_path)
+    out = census(tmp_path, {i: {"channel": "C6"} for i in ids})
+    fill(out, ["C6", "C6", "C9"])
+    with pytest.raises(SystemExit, match="outside C1 to C8"):
+        human_check(["agreement", str(tmp_path), "--labeled", str(out)])
+
+
+def test_episodes_with_no_machine_label_are_counted_apart(tmp_path):
+    ids = write_records(tmp_path)
+    out = census(tmp_path, {ids[0]: {"channel": "C6"}})
+    fill(out, ["C6", "C6", "C6"])
+    human_check(["agreement", str(tmp_path), "--labeled", str(out)])
+    result = json.loads((tmp_path / "route_census.json").read_text())
+    assert result["raw_agreement"] == "1/1" and result["no_machine_label"] == 2

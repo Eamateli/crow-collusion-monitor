@@ -54,4 +54,5 @@ routes_to_label.csv
 *_to_label.csv
 route_labels.json
 route_kappa.json
+route_census.json
 judge_repeatability_main.json

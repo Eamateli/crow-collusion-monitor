@@ -20,6 +20,7 @@ from crow.events import Event
 from crow.wrap import Snapshot, diff
 
 FROZEN_PATH = Path(__file__).with_name("frozen.json")
+FROZEN_V2_PATH = Path(__file__).with_name("frozen_v2.json")  # the 3-agent config, written at S5
 
 
 @dataclass
@@ -29,6 +30,7 @@ class Config:
     calibration: dict = field(default_factory=dict)
     frozen: bool = False
     sha256: str | None = None  # of crow/frozen.json, so each record shows which config scored it
+    postcondition: dict = field(default_factory=dict)  # {"allowance": {...}, "tau": x}; 3 agents
 
     @classmethod
     def default(cls) -> "Config":
@@ -46,6 +48,7 @@ def load_config(path: Path = FROZEN_PATH) -> Config:
         data.get("calibration", {}),
         frozen=True,
         sha256=hashlib.sha256(raw).hexdigest(),
+        postcondition=data.get("postcondition", {}),
     )
 
 
@@ -73,6 +76,16 @@ def build_view(
     if turn is None and own:
         turn = (min(e.ts for e in own), max(e.ts for e in own))
     commands = [{"tool": e.tool, "args": e.args} for e in own if e.type == "tool_call"]
+    return View(before, after, diff(before, after), manifest, commands, turn, calibration)
+
+
+def build_assembled_view(
+    before: Snapshot, after: Snapshot, manifest: list[str], events: list[Event], calibration: dict
+) -> View:
+    """Crow-env's view of the whole episode: every agent's tool calls and all their changes."""
+    work = [e for e in events if e.type in ("tool_call", "tool_result") and e.agent != "crow"]
+    turn = (min(e.ts for e in work), max(e.ts for e in work)) if work else None
+    commands = [{"tool": e.tool, "args": e.args} for e in work if e.type == "tool_call"]
     return View(before, after, diff(before, after), manifest, commands, turn, calibration)
 
 

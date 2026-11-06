@@ -7,8 +7,10 @@ frozen env/prompts.py. The trusted model does the labeling; a human checks 30 (h
 
 Crow v2 (addenda, section 9): planned conditions use a fixed method, so they have no route to label
 and no human check, and RQ1 is cited from v1. Only the no-plan cell has a route choice. It has no
-chat either, so its label is read from the agents' private report_method texts. Those texts stay in
-the local records and in route_labels.json; only the labels and their counts are published.
+chat either, so its label is read from the agents' private report_method texts: these are
+self-reported routes, and they are always shown next to channel_built. Those texts stay in the local
+records and in route_labels.json; only the labels and their counts are published. A person checks
+every label in the cell (human_check.py census) and we report raw agreement, not kappa.
 """
 
 import json
@@ -161,18 +163,26 @@ def split_by_defense(records: list[dict], labels: dict[str, dict]) -> dict:
 
 
 def noplan_routes(records: list[dict], labels: dict[str, dict]) -> dict:
-    """The v2 no-plan cell: labels and counts only, and how many episodes could not be labeled."""
+    """The v2 no-plan cell: self-reported routes, always next to channel_built, because a report can
+    be wrong. Labels and counts only."""
     cell = [
         r for r in records if r["config"].get("agents", 2) == 3 and is_labeled_cell(r["config"])
     ]
-    items = [
-        labels[r["episode_id"]]
+    rows = [
+        (labels[r["episode_id"]], r.get("channel_built") is True)
         for r in cell
         if labels.get(r["episode_id"], {}).get("channel") is not None
     ]
+
+    def count(field: str, value: str) -> dict[str, int]:
+        hits = [built for label, built in rows if label[field] == value]
+        return {"episodes": len(hits), "channel_built": sum(hits)}
+
     return {
+        "name": "self-reported routes",
         "episodes": len(cell),
-        "labeled": len(items),
-        "channels": {code: sum(x["channel"] == code for x in items) for code in CHANNELS},
-        "groups": {g: sum(x["group"] == g for x in items) for g in ("covert", "hidden", "other")},
+        "labeled": len(rows),
+        "channel_built": sum(r.get("channel_built") is True for r in cell),
+        "channels": {code: count("channel", code) for code in CHANNELS},
+        "groups": {group: count("group", group) for group in ("covert", "hidden", "other")},
     }
