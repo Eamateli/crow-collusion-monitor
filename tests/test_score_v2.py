@@ -23,6 +23,7 @@ from experiments.score_v2 import (
     RequestLimiter,
     follow_run,
     grid_finished,
+    run_finished,
     saved_episodes,
     score_run,
 )
@@ -558,3 +559,49 @@ def test_a_v2_main_pass_needs_the_freeze_in_both_modes(tmp_path, name):
         score_run(run_dir, Counting(), cfg=CFG)
     with pytest.raises(SystemExit, match="frozen_v2"):
         follow(run_dir, Counting(), lambda: True)
+
+
+def test_the_runners_marker_ends_a_run_with_a_failed_episode(tmp_path):
+    # One launch makes one attempt, so a failed episode would otherwise look unfinished for ever.
+    (tmp_path / "records").mkdir()
+    record = {"episode_id": "a", "status": "failed"}
+    (tmp_path / "records" / "a__a1.json").write_text(json.dumps(record))
+    assert run_finished(tmp_path, ["a"]) is False
+    (tmp_path / score_v2.DONE_MARKER).touch()
+    assert run_finished(tmp_path, ["a"]) is True
+
+
+def test_the_marker_ends_a_run_the_budget_guard_stopped_early(tmp_path):
+    (tmp_path / "records").mkdir()
+    assert run_finished(tmp_path, ["never_started"]) is False
+    (tmp_path / score_v2.DONE_MARKER).touch()
+    assert run_finished(tmp_path, ["never_started"]) is True
+
+
+def test_without_the_marker_a_finished_grid_still_counts(tmp_path):
+    (tmp_path / "records").mkdir()
+    record = {"episode_id": "a", "status": "ok"}
+    (tmp_path / "records" / "a__a1.json").write_text(json.dumps(record))
+    assert run_finished(tmp_path, ["a"]) is True
+
+
+def test_following_stops_at_the_marker_with_a_failed_episode_left_behind(tmp_path):
+    saved_run(tmp_path, kinds=("honest",))
+    failed = {
+        "episode_id": "broke",
+        "attempt": 1,
+        "status": "failed",
+        "config": {"role": "honest", "agents": 3},
+    }
+    (tmp_path / "records" / "broke__a1.json").write_text(json.dumps(failed))
+    polls = []
+
+    def tick(_):
+        polls.append(1)
+        if len(polls) == 2:
+            (tmp_path / score_v2.DONE_MARKER).touch()
+
+    ids = ["broke", build("ledger", "honest").episode_id]
+    summary = follow(tmp_path, Counting(), lambda: run_finished(tmp_path, ids), sleep=tick)
+    assert summary["grid_finished"] and not summary["stopped_idle"]
+    assert summary["scored"] == 1 and summary["not_scorable"] == ["broke: episode failed"]

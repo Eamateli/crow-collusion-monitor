@@ -43,6 +43,7 @@ ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_REQUESTS = 12
 MAX_EPISODE_ATTEMPTS = 2  # as experiments/modal_app.py, to_run: a third attempt never comes
 POLL_S, MAX_IDLE_S = 30.0, 3600.0
+DONE_MARKER = "episodes_done"  # in the run folder, once the runner's episodes have all ended
 FROZEN_RUNS = ("main", "v2_main")  # these run folders are scored only with crow/frozen_v2.json
 MAX_TOTAL_TOKENS = 40_000_000  # budget guard; about 18M expected for all 160 v2 episodes
 console = Console()
@@ -236,6 +237,13 @@ class _LimitedClient:
             return self.client.chat(messages, affinity_key=affinity_key, **params)
 
 
+def run_finished(run_dir: str | Path, episode_ids: Iterable[str]) -> bool:
+    """No more episodes are coming. The runner leaves a marker when its map ends, because one launch
+    makes one attempt: an episode that failed would otherwise look as if it still had one to come,
+    and a run the budget guard stopped would never look finished."""
+    return (Path(run_dir) / DONE_MARKER).exists() or grid_finished(run_dir, episode_ids)
+
+
 def grid_finished(run_dir: str | Path, episode_ids: Iterable[str]) -> bool:
     """Every episode of the grid has an ok record, or has used its attempts."""
     statuses: dict[str, list[str]] = {}
@@ -373,7 +381,7 @@ def main(argv: list[str] | None = None) -> int:
         summary = follow_run(
             args.run_dir,
             trusted_client(),
-            lambda: grid_finished(args.run_dir, ids),
+            lambda: run_finished(args.run_dir, ids),
             max_tokens=args.max_tokens,
         )
     else:

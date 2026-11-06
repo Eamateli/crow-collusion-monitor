@@ -28,3 +28,11 @@ def test_the_grids_are_the_v2_ones():
     assert len(modal_app.V2_GRIDS["v2_main"]()) == 130
     assert len(modal_app.V2_GRIDS["v2_calibration"]()) == 30
     assert len(modal_app.V2_GRIDS["v2_smoke"]()) == 12
+
+
+def test_the_runner_tells_the_pass_when_its_episodes_have_ended():
+    source = inspect.getsource(modal_app)
+    start = source.index("scoring = score_run_remote.spawn")
+    end = source.index("scoring.get()")
+    assert source.rindex("set_episodes_done.remote(run, False)", 0, start) < start
+    assert source.index("set_episodes_done.remote(run, True)", start) < end

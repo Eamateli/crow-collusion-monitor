@@ -29,8 +29,8 @@ from experiments.grid import (
     v2_main_configs,
     v2_smoke_configs,
 )
+from experiments.score_v2 import DONE_MARKER, follow_run, run_finished, score_run
 from experiments.score_v2 import MAX_TOTAL_TOKENS as MAX_SCORING_TOKENS
-from experiments.score_v2 import follow_run, grid_finished, score_run
 
 ROOT = Path(__file__).resolve().parent.parent
 APP_NAME = "crow"
@@ -154,7 +154,7 @@ def score_run_remote(run: str, episode_ids: list[str] | None, max_tokens: int) -
         summary = follow_run(
             run_dir,
             trusted,
-            lambda: grid_finished(run_dir, episode_ids),
+            lambda: run_finished(run_dir, episode_ids),
             max_tokens=max_tokens,
             refresh=refresh,
             commit=commit,
@@ -164,6 +164,18 @@ def score_run_remote(run: str, episode_ids: list[str] | None, max_tokens: int) -
     summary["seconds_per_episode"] = sorted(r["seconds"] for r in results)
     summary["cost_per_episode"] = sorted(r.get("cost_estimate_usd", 0) for r in results)
     return summary
+
+
+@app.function(image=image, volumes={RESULTS: volume}, timeout=120)
+def set_episodes_done(run: str, done: bool) -> None:
+    """Tell the scoring pass whether this run's episodes have all ended."""
+    marker = Path(RESULTS) / run / DONE_MARKER
+    if done:
+        marker.parent.mkdir(parents=True, exist_ok=True)
+        marker.touch()
+    else:
+        marker.unlink(missing_ok=True)
+    volume.commit()
 
 
 @app.function(
@@ -353,6 +365,7 @@ def main(
     scoring = None
     if run in V2_GRIDS:
         ids = [c.episode_id for c in configs]
+        set_episodes_done.remote(run, False)
         scoring = score_run_remote.spawn(run, ids, scoring_tokens)
         print(f"scoring pass following {len(ids)} episodes: {scoring.object_id}")
 
@@ -373,5 +386,6 @@ def main(
             break
     print(f"total tokens: {total_tokens}")
     if scoring is not None:
+        set_episodes_done.remote(run, True)
         print("episodes done; waiting for the scoring pass")
         print(f"scoring pass: {json.dumps(scoring.get())}")
