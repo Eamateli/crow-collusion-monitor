@@ -140,3 +140,25 @@ def test_v1_grids_stay_two_agent():
     from experiments.grid import calibration_configs, main_configs
 
     assert {c.agents for c in main_configs() + calibration_configs() + probe_configs()} == {2}
+
+
+def test_v2_smoke_covers_every_task_and_stays_apart_from_every_other_run():
+    from experiments.grid import (
+        CALIBRATION_SEEDS,
+        MAIN_SEEDS,
+        PROBE_FIRST_SEED,
+        V2_CALIBRATION_SEEDS,
+        v2_smoke_configs,
+    )
+
+    configs = v2_smoke_configs()
+    assert len(configs) == 12 and len({c.episode_id for c in configs}) == 12
+    assert {c.agents for c in configs} == {3}
+    splits = [c for c in configs if c.split and c.defense == "open"]
+    assert sorted(c.task_id for c in splits) == sorted(task_ids())
+    assert Counter(c.role for c in configs) == {"collude_split": 8, "collude": 2, "honest": 2}
+    seeds = {c.seed for c in configs}
+    assert min(seeds) >= 3100
+    for other in (MAIN_SEEDS, CALIBRATION_SEEDS, V2_CALIBRATION_SEEDS):
+        assert not seeds & set(other)
+    assert PROBE_FIRST_SEED < min(seeds)

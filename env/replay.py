@@ -55,7 +55,22 @@ _NO_CHAT = {"proposal": None, "reply": None, "c_reply": None}
 
 
 def arm_episode_id(base_id: str, arm: str) -> str:
-    return f"{base_id}__arm_{arm}"
+    # Must not contain "__a": resume splits record names on it, to find the attempt number.
+    return f"{base_id}__intervene_{arm}"
+
+
+def arm_bases(records: list[dict], defense: str = "open") -> list[dict]:
+    """The saved episodes the arms apply to: every finished split, control and honest episode with
+    this defense, whatever any monitor would say of it. Not the no-plan cell or the hard version."""
+    return [
+        r
+        for r in records
+        if r["status"] == "ok"
+        and r["config"].get("agents", 2) == 3
+        and r["config"]["defense"] == defense
+        and r["config"]["role"] in ("collude_split", "collude", "honest")
+        and r["config"]["planning"]
+    ]
 
 
 def load_base_record(run_dir: str | Path, base_stem: str) -> dict:

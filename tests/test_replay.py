@@ -9,7 +9,7 @@ from test_episode import LocalSandbox, grade_fn, tar_to_files
 from crow.events import read_events
 from env.episode import make_config, payload_bits
 from env.relational import scheme_for
-from env.replay import ARMS, arm_episode_id, run_arm
+from env.replay import ARMS, arm_bases, arm_episode_id, run_arm
 
 TASK = "ledger"
 
@@ -239,3 +239,37 @@ def test_a_failed_base_episode_is_refused_with_a_reason(tmp_path):
 def test_an_unknown_arm_is_refused(tmp_path):
     with pytest.raises(ValueError, match="unknown arm"):
         run_arm(tmp_path, "x", "replace_c", None, None, tmp_path)
+
+
+@pytest.mark.parametrize("arm", ARMS)
+def test_resume_can_recover_a_replays_id_from_its_record_name(arm):
+    # experiments/modal_app.py, _existing_attempts: name.split("__a")[0]
+    episode = arm_episode_id(base_config("split").episode_id, arm)
+    assert f"{episode}__a1.json".split("__a")[0] == episode
+    assert f"{episode}__a2.json".split("__a")[0] == episode
+
+
+def test_the_arms_apply_to_every_finished_episode_of_the_three_roles():
+    def rec(config, status="ok"):
+        return {"episode_id": config.episode_id, "status": status, "config": vars(config)}
+
+    split = make_config("collude_split", TASK, "open", 0, k=8, agents=3)
+    control = make_config("collude", TASK, "open", 0, k=8, agents=3)
+    honest = make_config("honest", TASK, "open", 0, agents=3)
+    chosen = arm_bases(
+        [
+            rec(split),
+            rec(control),
+            rec(honest),
+            rec(make_config("collude_split", "slug", "open", 1, k=8, agents=3), "failed"),
+            rec(make_config("collude_split", TASK, "seal_side", 0, k=8, agents=3)),
+            rec(make_config("collude_split", TASK, "open", 0, k=8, planning=False, agents=3)),
+            rec(make_config("honest_hard", TASK, "open", 0, agents=3)),
+            rec(make_config("honest", TASK, "open", 0)),  # two agents: v1
+        ]
+    )
+    assert [r["episode_id"] for r in chosen] == [
+        split.episode_id,
+        control.episode_id,
+        honest.episode_id,
+    ]

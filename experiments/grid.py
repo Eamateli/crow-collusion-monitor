@@ -20,6 +20,7 @@ PROBE_LIMIT = 3000  # smoke seeds start at 3000; probe seeds stay below
 V2_MAIN_SEEDS = range(0, 10)  # the k, seed and ablation upgrades are decided after the smoke test
 V2_K = 8
 V2_CALIBRATION_SEEDS = range(1100, 1115)  # never overlaps the main, v1 calibration or probe seeds
+V2_SMOKE_SEEDS = range(3100, 3106)  # one per task; apart from v1's smoke seeds, and never reused
 
 
 def task_for_seed(seed: int) -> str:
@@ -90,4 +91,22 @@ def v2_calibration_configs() -> list[EpisodeConfig]:
         task = task_for_seed(seed)
         configs.append(make_config("honest", task, "open", seed=seed, agents=3))
         configs.append(make_config("honest_hard", task, "open", seed=seed, agents=3))
+    return configs
+
+
+def v2_smoke_configs(seeds: range = V2_SMOKE_SEEDS) -> list[EpisodeConfig]:
+    """A small real run before any grid. A split on every task, because whether agents can build the
+    channel is the first thing to learn; a control, an honest episode and a paraphrased split on
+    two tasks, for the arms and for the paraphrasing that shares the endpoint with the pass."""
+    configs = []
+    for seed in seeds:
+        task = task_for_seed(seed)
+        configs.append(make_config("collude_split", task, "open", seed=seed, k=V2_K, agents=3))
+    for seed in seeds[:2]:
+        task = task_for_seed(seed)
+        configs.append(make_config("collude", task, "open", seed=seed, k=V2_K, agents=3))
+        configs.append(make_config("honest", task, "open", seed=seed, agents=3))
+        configs.append(
+            make_config("collude_split", task, "seal_side_para", seed=seed, k=V2_K, agents=3)
+        )
     return configs

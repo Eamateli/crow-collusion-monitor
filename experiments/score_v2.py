@@ -43,6 +43,7 @@ ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_REQUESTS = 12
 MAX_EPISODE_ATTEMPTS = 2  # as experiments/modal_app.py, to_run: a third attempt never comes
 POLL_S, MAX_IDLE_S = 30.0, 3600.0
+FROZEN_RUNS = ("main", "v2_main")  # these run folders are scored only with crow/frozen_v2.json
 MAX_TOTAL_TOKENS = 40_000_000  # budget guard; about 18M expected for all 160 v2 episodes
 console = Console()
 
@@ -163,7 +164,7 @@ def score_run(
         raise ValueError(f"max_requests must be 1 to {MAX_TRUSTED_REQUESTS}, got {max_requests}")
     run_dir = Path(run_dir)
     cfg = cfg or load_config(FROZEN_V2_PATH)
-    if run_dir.name == "main" and not cfg.frozen:
+    if run_dir.name in FROZEN_RUNS and not cfg.frozen:
         raise SystemExit("main pass refused: crow/frozen_v2.json is missing (S5)")
     episodes, skipped = saved_episodes(run_dir)
     todo = [e for e in episodes if not _already_scored(e)]
@@ -275,14 +276,15 @@ def follow_run(
         )
     run_dir = Path(run_dir)
     cfg = cfg or load_config(FROZEN_V2_PATH)
-    if run_dir.name == "main" and not cfg.frozen:
+    if run_dir.name in FROZEN_RUNS and not cfg.frozen:
         raise SystemExit("main pass refused: crow/frozen_v2.json is missing (S5)")
     limiter = RequestLimiter(running_requests)
     limited = _LimitedClient(client, limiter)
     lock = threading.Lock()
-    spent = {"tokens": 0, "stopped": 0}
+    spent = {"tokens": 0, "stopped": 0, "commit_failures": 0}
     results: list[dict] = []
     submitted: set[str] = set()
+    futures = []
 
     def run(episode: SavedEpisode) -> None:
         with lock:
@@ -295,7 +297,10 @@ def follow_run(
             spent["tokens"] += tokens.get("prompt", 0) + tokens.get("completion", 0)
             results.append(result)
             if commit is not None:
-                commit()
+                try:
+                    commit()
+                except Exception:  # noqa: BLE001 - the next commit carries this file too
+                    spent["commit_failures"] += 1
 
     started, last_new = clock(), clock()
     refresh_failures, already, skipped = 0, 0, []
@@ -317,7 +322,7 @@ def follow_run(
                 if _already_scored(episode):
                     already += 1
                 else:
-                    pool.submit(run, episode)
+                    futures.append((episode.episode_id, pool.submit(run, episode)))
             if finished:
                 limiter.raise_to(final_requests)  # the episodes no longer need the endpoint
                 break
@@ -325,9 +330,13 @@ def follow_run(
                 idle = True
                 break
             sleep(poll_s)
+    # A file that could not be written, for one: never let an episode vanish without a word.
+    crashed = [f"{name}: {f.exception()!r}" for name, f in futures if f.exception() is not None]
     failed = [r for r in results if r["status"] != "ok"]
     return {
         "episodes": len(submitted),
+        "crashed": crashed,
+        "commit_failures": spent["commit_failures"],
         "already_scored": already,
         "scored": len(results) - len(failed),
         "failed": [f"{r['episode_id']}: {r['reason']}" for r in failed],
@@ -376,7 +385,12 @@ def main(argv: list[str] | None = None) -> int:
         )
     summary.pop("results")
     console.print_json(data=summary)
-    incomplete = summary["failed"] or summary["not_started_budget"] or summary.get("stopped_idle")
+    incomplete = (
+        summary["failed"]
+        or summary["not_started_budget"]
+        or summary.get("stopped_idle")
+        or summary.get("crashed")
+    )
     return 1 if incomplete else 0
 
 

@@ -18,6 +18,7 @@ from crow.score import Config
 from env.episode import score_three
 from env.planted import build
 from env.prompts import MAX_TRUSTED_REQUESTS, MONITOR_CALLS, RUNNING_REQUESTS
+from experiments import score_v2
 from experiments.score_v2 import (
     RequestLimiter,
     follow_run,
@@ -516,3 +517,44 @@ def test_the_pass_reads_only_the_task_and_its_version_from_a_record(tmp_path):
     episode.config = OnlyThese(episode.config)
     task, variant, *_ = episode.inputs()
     assert task.id == "ledger" and variant == "base"
+
+
+# --- nothing is lost while following ---
+
+
+def test_a_score_that_cannot_be_written_is_reported_not_lost(tmp_path, monkeypatch):
+    saved_run(tmp_path, kinds=("honest", "split_ladder"))
+    real = score_v2.score_episode
+
+    def flaky(episode, *args, **kwargs):
+        if "split_ladder" in episode.stem:
+            raise OSError("the volume refused the write")
+        return real(episode, *args, **kwargs)
+
+    monkeypatch.setattr(score_v2, "score_episode", flaky)
+    summary = follow(tmp_path, Counting(), lambda: True)
+    assert summary["scored"] == 1
+    assert len(summary["crashed"]) == 1 and "the volume refused" in summary["crashed"][0]
+
+
+def test_a_failed_commit_is_counted_and_scoring_goes_on(tmp_path):
+    saved_run(tmp_path)
+    calls = []
+
+    def commit():
+        calls.append(1)
+        if len(calls) == 1:
+            raise RuntimeError("commit failed")
+
+    summary = follow(tmp_path, Counting(), lambda: True, commit=commit)
+    assert summary["scored"] == 3 and summary["commit_failures"] == 1 and len(calls) == 3
+
+
+@pytest.mark.parametrize("name", ["main", "v2_main"])
+def test_a_v2_main_pass_needs_the_freeze_in_both_modes(tmp_path, name):
+    run_dir = tmp_path / name
+    run_dir.mkdir()
+    with pytest.raises(SystemExit, match="frozen_v2"):
+        score_run(run_dir, Counting(), cfg=CFG)
+    with pytest.raises(SystemExit, match="frozen_v2"):
+        follow(run_dir, Counting(), lambda: True)
