@@ -1,4 +1,5 @@
-"""Raw episode records -> analysis/numbers.json, paper/tables and paper/figures (Step 10).
+"""Raw episode records -> analysis/numbers.json, graphs_numbers/tables and graphs_numbers/figures
+(Step 10).
 
 numbers.json is the single source of every number in the report. Detection, capacity, collusion
 success, usefulness and failure counts are computed from the records alone, so this runs offline.
@@ -37,7 +38,7 @@ from crow.detectors import DETECTORS  # noqa: E402
 from crow.score import load_config  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent.parent
-TABLES, FIGURES = ROOT / "paper" / "tables", ROOT / "paper" / "figures"
+TABLES, FIGURES = ROOT / "graphs_numbers" / "tables", ROOT / "graphs_numbers" / "figures"
 NUMBERS = ROOT / "analysis" / "numbers.json"
 DEFENSES = ["open", "seal_side", "seal_side_para"]
 KS = [1, 8, 32]
