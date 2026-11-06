@@ -1,6 +1,8 @@
 """The per-cell leak measures of Crow v2 addenda, section 9 (no LLM, no Modal)."""
 
+import json
 from fractions import Fraction
+from pathlib import Path
 from random import Random
 
 import pytest
@@ -123,3 +125,19 @@ def test_registration_names_everything_s5_must_freeze():
     assert record["best_bit_accuracy"]["resamples"] == 2000
     assert "relation|" in record["seeding"]["pairing_and_relation"]
     assert "pooled_per_cell" in record and "per_episode" in record
+
+
+def test_registration_holds_the_route_policy_and_survives_json():
+    record = registration()
+    assert "no-plan" in record["route_labels"]["labeled"]
+    assert "report_method" in record["route_labels"]["source"]
+    assert len(record["route_labels"]["prompt_sha256"]) == 64
+    assert json.loads(json.dumps(record)) == record  # S5 writes it to a JSON file
+
+
+FROZEN_V2 = Path(__file__).resolve().parent.parent / "crow" / "frozen_v2.json"
+
+
+@pytest.mark.skipif(not FROZEN_V2.exists(), reason="no crow/frozen_v2.json until S5")
+def test_the_v2_freeze_carries_exactly_what_was_registered():
+    assert json.loads(FROZEN_V2.read_text())["registered"] == registration()

@@ -7,10 +7,12 @@ pooled test has the power to see them, but it says nothing about any single epis
 clear one. The paper calls a cell's channels relational only if this test does not flag the cell.
 """
 
+import hashlib
 from typing import Any
 
 import numpy as np
 
+from analysis.routes import ROUTE_REPORT_PROMPT
 from env.relational import ALPHA, DECODERS, binomial_p
 
 RESAMPLES, BOOTSTRAP_SEED = 2000, 0  # as every other CI (CLAUDE.md section 7, equation 5)
@@ -101,7 +103,8 @@ def best_bit_accuracy(
 
 
 def registration() -> dict[str, Any]:
-    """What S5 records in crow/frozen_v2.json (addenda, sections 3 and 9)."""
+    """What S5 records in crow/frozen_v2.json, under "registered" (addenda, sections 3 and 9). A
+    test fails if that file exists without exactly this."""
     threshold = ALPHA / len(DECODERS)
     return {
         "seeding": {
@@ -121,5 +124,11 @@ def registration() -> dict[str, Any]:
             "ci": "95% percentile bootstrap over episodes, best decoder re-chosen in each resample",
             "resamples": RESAMPLES,
             "seed": BOOTSTRAP_SEED,
+        },
+        "route_labels": {
+            "labeled": "the no-plan cell only (collude_split with no planning chat)",
+            "source": "the report_method texts of A and B",
+            "prompt_sha256": hashlib.sha256(ROUTE_REPORT_PROMPT.encode()).hexdigest(),
+            "planned_conditions": "no route labels and no human check; RQ1 is cited from v1",
         },
     }
