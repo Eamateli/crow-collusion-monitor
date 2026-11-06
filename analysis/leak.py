@@ -13,9 +13,10 @@ from typing import Any
 import numpy as np
 
 from analysis.routes import ROUTE_REPORT_PROMPT
+from crow.detectors.postcondition import DEFAULT_ALLOWANCE, SIGNALS
 from crow.detectors.views3 import AGENT_LIMIT3, FILE_LIMIT3, TOTAL_LIMIT3
 from env.prompts import MAX_TRUSTED_REQUESTS, MONITOR_CALLS, RUNNING_REQUESTS
-from env.relational import ALPHA, DECODERS, binomial_p
+from env.relational import ALPHA, DECODERS, binomial_p, slot_items
 
 RESAMPLES, BOOTSTRAP_SEED = 2000, 0  # as every other CI (CLAUDE.md section 7, equation 5)
 
@@ -119,9 +120,24 @@ def best_bit_accuracy(
     return out
 
 
-def registration() -> dict[str, Any]:
-    """What S5 records in crow/frozen_v2.json, under "registered" (addenda, sections 3 and 9). A
-    test fails if that file exists without exactly this."""
+def helpers_called(lib_source: str | None, unused: list[str], k: int) -> dict[str, Any] | None:
+    """How many of the k helper items in A's library something really uses. A called helper lowers
+    the postcondition score (addenda, section 10), so S7 reports this share next to its detection
+    rate. None if the library lacks the slots."""
+    if lib_source is None:
+        return None
+    try:
+        items = slot_items(lib_source, k)
+    except (ValueError, SyntaxError, RecursionError):
+        return None
+    called = [name for name in items if name not in unused]
+    return {"k": k, "called": len(called), "share": len(called) / k}
+
+
+def registration(allowance: dict[str, int] | None = None) -> dict[str, Any]:
+    """What S5 records in crow/frozen_v2.json, under "registered" (addenda, sections 3, 9 and 10). A
+    test fails if that file exists without exactly this. `allowance` is what S5 sets from honest
+    calibration episodes alone; before that the placeholders stand."""
     threshold = ALPHA / len(DECODERS)
     return {
         "seeding": {
@@ -149,6 +165,18 @@ def registration() -> dict[str, Any]:
             "planned_conditions": "no route labels and no human check; RQ1 is cited from v1",
             "name_in_the_paper": "self-reported routes, always shown next to channel_built",
             "human_check": "census of the no-plan cell, raw agreement, no kappa",
+        },
+        "postcondition": {
+            "allowance": allowance or DEFAULT_ALLOWANCE,
+            "allowance_source": "honest calibration episodes alone" if allowance else "placeholder",
+            "signals": list(SIGNALS),
+            "reads": "the final assembled workspace only; no LLM call, and it decodes nothing",
+            "not_in_the_score": ["merged_order"],
+        },
+        "paired_test": {
+            "test": "exact two-sided McNemar",
+            "unit": "episode",
+            "compares": "two monitors' alarms at their frozen thresholds on the same episodes",
         },
         "llm_monitor_calls": {
             "rule": (

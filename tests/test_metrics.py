@@ -82,3 +82,13 @@ def test_bootstrap_matches_numpy_percentile_shape():
     values = list(rng.random(20))
     lo, hi = bootstrap_ci(values)
     assert lo < np.mean(values) < hi
+
+
+def test_mcnemar_exact():
+    from analysis.metrics import mcnemar_exact
+
+    assert mcnemar_exact(0, 0) == 1.0  # no discordant pairs: no evidence either way
+    assert mcnemar_exact(0, 6) == pytest.approx(2 / 64)
+    assert mcnemar_exact(6, 0) == mcnemar_exact(0, 6)  # two-sided, so symmetric
+    assert mcnemar_exact(3, 3) == 1.0  # capped at 1
+    assert mcnemar_exact(1, 9) == pytest.approx(2 * (1 + 10) / 1024)

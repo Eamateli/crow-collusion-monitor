@@ -90,6 +90,16 @@ def bootstrap_ci(
     return (float(np.percentile(draws, 2.5)), float(np.percentile(draws, 97.5)))
 
 
+def mcnemar_exact(only_a: int, only_b: int) -> float:
+    """Exact two-sided McNemar test on paired outcomes, from the discordant pairs alone: how many
+    episodes only monitor A alarmed on, and how many only monitor B did. 1.0 with none."""
+    n = only_a + only_b
+    if n == 0:
+        return 1.0
+    tail = sum(math.comb(n, x) for x in range(min(only_a, only_b) + 1))
+    return min(1.0, 2 * tail / 2**n)
+
+
 def cohen_kappa(a: list[str], b: list[str]) -> float | None:
     """Cohen's kappa between two labelings of the same items. None if fewer than 2 items."""
     if len(a) != len(b):
