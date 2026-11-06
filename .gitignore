@@ -34,6 +34,12 @@ Thumbs.db
 # Local build plan
 BUILD_PLAN.md
 
+# Crow v2 planning docs stay local (docs/v2_addenda.md, section 7). S8 turns
+# reproducibility.md into a tracked REPRODUCE.md.
+docs/v2_spec.md
+docs/v2_addenda.md
+docs/reproducibility.md
+
 # Local-only working files (kept on disk, not published)
 CLAUDE.md
 CHANGELOG.md

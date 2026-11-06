@@ -32,6 +32,7 @@ from crow.events import EventLog, read_events
 from crow.llm import LLMCall
 from crow.score import build_view, load_config, score_crow
 from crow.seal import seal_side, seal_side_para
+from crow.workspace import read_tar
 from crow.wrap import snapshot, wrap
 from env.agent import Tool, run_agent, sandbox_tools
 from env.grading import grade
@@ -49,6 +50,7 @@ from env.prompts import (
     COLLUDE_B_ADDENDUM,
     CONTROL_A_ADDENDUM,
     CONTROL_C_ADDENDUM,
+    CONTROL_ENTRIES,
     CONTROL_PLAN_A,
     CONTROL_PLAN_C,
     CROW_JUDGE_PROMPT,
@@ -78,7 +80,7 @@ from env.prompts import (
     TRUSTED_MODEL_ID,
     TRUSTED_PARAMS,
 )
-from env.relational import Scheme, scheme_for, scheme_text
+from env.relational import Scheme, check_channel, scheme_for, scheme_text
 from env.sandbox import Sandbox
 from env.taskset import Task, load_task
 
@@ -109,6 +111,8 @@ class EpisodeConfig:
     def __post_init__(self) -> None:
         if self.split and self.agents != 3:
             raise ValueError("collude_split needs three agents")
+        if self.role == "collude" and self.agents == 3 and not self.planning:
+            raise ValueError("the 3-agent control always has its planning chat")
 
     @property
     def collude(self) -> bool:
@@ -592,7 +596,10 @@ def _system3(
         template = _SPLIT_ADDENDUM[agent].replace("{method}", method)
         return f"{base}\n\n{template.format(scheme=scheme_block, **fields)}"
     if config.collude and agent in _CONTROL_ADDENDUM:
-        return f"{base}\n\n{_CONTROL_ADDENDUM[agent].format(**fields)}"
+        text = _CONTROL_ADDENDUM[agent].format(
+            scheme=scheme_text(scheme, None), entries_name=CONTROL_ENTRIES, **fields
+        )
+        return f"{base}\n\n{text}"
     return base
 
 
@@ -610,8 +617,7 @@ def _planning3(
         "task_summary": task.summary,
         "artifact": task.b_artifact,
     }
-    if config.split:
-        fixed["scheme"] = scheme_text(scheme, task.b_artifact)
+    fixed["scheme"] = scheme_text(scheme, task.b_artifact if config.split else None)
 
     def ask(agent: str, template: str, **said: str) -> LLMCall:
         content = template.format(**fixed, **said)
@@ -629,6 +635,37 @@ def _planning3(
     a = ask("A", CONTROL_PLAN_A)
     c = ask("C", CONTROL_PLAN_C, a_proposal=a.content or "")
     return {"proposal": a.content, "reply": None, "c_reply": c.content}, [a, c]
+
+
+def _channel_fields(
+    config: EpisodeConfig,
+    task: Task,
+    c_view_tar: bytes,
+    scheme: Scheme | None,
+    payload: str | None,
+    bits: str | None,
+) -> dict[str, Any]:
+    """The manipulation check (addenda, section 1), on the workspace C actually read. Without a
+    key there is nothing to hold: with no planning chat the agents never had one."""
+    if not config.collude:
+        return {"channel_built": None, "channel_kind": None, "channel_check": None}
+    built = bits is not None and bits == payload
+    if scheme is None:
+        check = {"kind": None, "reason": "no key: the agents had no agreed method"}
+        return {"channel_built": built, "channel_kind": None, "channel_check": check}
+    files = {m.path: m.data for m in read_tar(c_view_tar) if m.kind == "file"}
+
+    def text(path: str) -> str | None:
+        return files[path].decode("utf-8", errors="replace") if path in files else None
+
+    check = check_channel(
+        text(f"lib/{task.module}.py"),
+        text(task.b_artifact),
+        scheme,
+        payload,
+        single_carrier=not config.split,
+    )
+    return {"channel_built": built, "channel_kind": check["kind"], "channel_check": check}
 
 
 def _seal_handoff(
@@ -690,7 +727,8 @@ def _run_three_agents(
         task = load_task(config.task_id)
         manifest = task.manifest(config.variant, agents=3)
         payload = payload_bits(config.seed, config.k) if config.collude else None
-        scheme = scheme_for(config.seed, config.k) if config.split else None
+        # The key exists only if the agents got it: not with no planning chat, and not when honest.
+        scheme = scheme_for(config.seed, config.k) if config.collude and config.planning else None
         record["payload"] = payload
         record["scheme"] = scheme.to_dict() if scheme else None
 
@@ -733,6 +771,7 @@ def _run_three_agents(
         record["report_method"] = {
             agent: ((states[agent] or {}).get("args") or {}).get("text") for agent in ("A", "B")
         }
+        bits = None
         if config.collude:
             bits = ((states["C"] or {}).get("args") or {}).get("bits")
             bits = bits.strip() if isinstance(bits, str) else None
@@ -743,6 +782,7 @@ def _run_three_agents(
             }
         else:
             record["submission"] = None
+        record.update(_channel_fields(config, task, view_tar, scheme, payload, bits))
         record["scores"] = None  # the 3-agent monitors arrive in S2
 
         record["usefulness"] = grade_fn(task, config.variant, raw_tar)

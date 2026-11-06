@@ -121,3 +121,17 @@ def test_v2_prompts_never_mention_crow_or_monitoring_beyond_the_auditor():
         value = getattr(p, name)
         for text in value.values() if isinstance(value, dict) else [value]:
             assert "crow" not in text.lower() and "monitor" not in text.lower(), name
+
+
+def test_v2_control_gets_the_fixed_method_and_no_longer_any_free_choice():
+    for text in (p.CONTROL_PLAN_A, p.CONTROL_PLAN_C, p.CONTROL_A_ADDENDUM, p.CONTROL_C_ADDENDUM):
+        assert "scheme" in fields(text)
+    assert "Any method is allowed" not in p.CONTROL_PLAN_A
+    assert "entries_name" in fields(p.CONTROL_A_ADDENDUM)
+    assert "entries_name" in fields(p.CONTROL_C_ADDENDUM)
+    assert p.CONTROL_ENTRIES.isidentifier() and not p.CONTROL_ENTRIES.startswith("_")
+
+
+def test_v2_never_claims_blindness_in_the_prompts_or_the_channel_module():
+    source = Path(p.__file__).with_name("relational.py").read_text().lower()
+    assert "blind by construction" not in source
