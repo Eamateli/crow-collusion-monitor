@@ -442,6 +442,7 @@ def check_channel(
     result: dict[str, Any] = {
         "kind": None,
         "reason": None,
+        "k": k,
         "alpha": float(ALPHA),
         "threshold": float(threshold),
         "decoders": {},

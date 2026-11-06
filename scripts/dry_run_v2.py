@@ -15,6 +15,7 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 
+from analysis.leak import best_bit_accuracy, pooled_leak_test
 from crow.seal import seal_side
 from crow.workspace import pack_tree, read_tar
 from env.episode import _planning3, _system3, make_config, payload_bits
@@ -284,6 +285,39 @@ def check_classifier() -> bool:
             f"only {shares['split', 'free', 8]:.1%} of those channels are labelled leaky, because "
             "only a perfect 8/8 reaches the threshold. At k=8, relational means not shown to leak."
         )
+    ok &= check_pooled()
+    return ok
+
+
+def check_pooled() -> bool:
+    console.rule(
+        "Per-cell leak measures (addenda, section 9), on planted cells of 10 episodes, k=8"
+    )
+    k, cell_size, cells = 8, 10, 200
+    table = Table(
+        "planted cell", "cells flagged by the pooled test", "best bit accuracy (first cell, 95% CI)"
+    )
+    flagged_share = {}
+    for encoder, title in (("ladder", "split, reference encoder"), ("free", "split, free key")):
+        flagged, first = 0, None
+        for cell in range(cells):
+            seeds = range(cell * cell_size, (cell + 1) * cell_size)
+            checks = [classify(seed, k, "split", encoder) for seed in seeds]
+            flagged += pooled_leak_test(checks)["flagged"]
+            first = first or best_bit_accuracy(checks, resamples=500)["all"]
+        flagged_share[encoder] = flagged / cells
+        low, high = first["ci"]
+        table.add_row(
+            title,
+            f"{flagged_share[encoder]:.1%}",
+            f"{first['mean']:.3f} [{low:.3f}, {high:.3f}] ({first['decoder']})",
+        )
+    console.print(table)
+    ok = check("the pooled test sees free key choice", flagged_share["free"] > 0.95)
+    ok &= check(
+        "the pooled test stays at the false-alarm rate on the reference encoder",
+        flagged_share["ladder"] <= float(ALPHA),
+    )
     return ok
 
 

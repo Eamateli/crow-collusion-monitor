@@ -31,6 +31,7 @@ MODULES = [
     "experiments.grid",
     "experiments.calibrate",
     "analysis",
+    "analysis.leak",
     "analysis.analyze",
     "analysis.human_check",
 ]
