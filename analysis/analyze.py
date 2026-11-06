@@ -7,8 +7,11 @@ Route labels (--label-routes) and the judge repeatability diagnostic (--repeat) 
 endpoint and are cached next to the records; the human kappa is added by analysis/human_check.py.
 
     python analysis/analyze.py MAIN_DIR [--label-routes] [--repeat 20]
+    python analysis/analyze.py --pilot
 
 MAIN_DIR holds records/, events/ and workspaces/ (e.g. `modal volume get crow-results main`).
+--pilot needs no raw data: it refreshes only the s2_pilot section of numbers.json, from the
+committed results/pilot/monitor_repeat.json, and leaves every other number as it is.
 """
 
 import argparse
@@ -33,6 +36,7 @@ from analysis.metrics import (  # noqa: E402
     roc_curve,
     tpr_at_fpr,
 )
+from analysis.pilot import pilot_numbers  # noqa: E402
 from analysis.routes import split_by_defense  # noqa: E402
 from crow.detectors import DETECTORS  # noqa: E402
 from crow.score import load_config  # noqa: E402
@@ -522,6 +526,7 @@ def analyze(main_dir: Path, label_routes_n: bool, repeat_n: int) -> dict:
         "schelling": schelling_summary(ok, tau),
         "usefulness": usefulness_table(ok),
         "failures": failure_table(failed, ok, main_dir),
+        "s2_pilot": pilot_numbers(),
     }
 
     routes_cache = main_dir / "route_labels.json"
@@ -628,9 +633,18 @@ def _run_repeatability(main_dir: Path, ok: list[dict], n: int, cache: Path) -> d
     return result
 
 
+def refresh_pilot(numbers_path: Path = NUMBERS) -> dict:
+    """Only the s2_pilot section of numbers.json; every other number stays as it is."""
+    numbers = json.loads(numbers_path.read_text(encoding="utf-8"))
+    numbers["s2_pilot"] = pilot_numbers()
+    numbers_path.write_text(json.dumps(numbers, indent=2) + "\n", encoding="utf-8")
+    return numbers["s2_pilot"]
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("main_dir")
+    parser.add_argument("main_dir", nargs="?")
+    parser.add_argument("--pilot", action="store_true", help="refresh only the s2_pilot section")
     parser.add_argument(
         "--label-routes", action="store_true", help="label routes (trusted endpoint)"
     )
@@ -638,6 +652,12 @@ def main(argv: list[str] | None = None) -> int:
         "--repeat", type=int, default=0, help="judge repeatability sample (endpoint)"
     )
     args = parser.parse_args(argv)
+    if args.pilot:
+        pilot = refresh_pilot()
+        print(f"numbers.json s2_pilot: {pilot['calls']} calls, rule {pilot['rule']}")
+        return 0
+    if not args.main_dir:
+        parser.error("MAIN_DIR is required unless --pilot is given")
     numbers = analyze(Path(args.main_dir), args.label_routes, args.repeat)
     m = numbers["meta"]
     print(f"numbers.json: {m['n_ok']} ok, {m['n_failed']} failed; tau {m['tau']}")

@@ -9,8 +9,9 @@ A's raw output before any sealing; sealing is applied before B's turn.
 
 A config with agents=3 takes the Crow v2 flow instead (_run_three_agents; the v2 spec, section 1):
 A and B build, C integrates, and the defense applies at each handoff. The two-agent flow is left
-exactly as it ran in v1. Monitors score each agent's raw output, as in v1: score_three reads what
-the agents wrote, however sealing changed what the next agent saw.
+exactly as it ran in v1. An episode makes no monitor call: it saves every raw workspace and its
+event log, and a separate pass (experiments/score_v2.py) runs score_three on them. Monitors score
+each agent's raw output, as in v1, however sealing changed what the next agent saw.
 """
 
 import json
@@ -41,7 +42,6 @@ from crow.detectors.views3 import (
 from crow.events import Event, EventLog, read_events
 from crow.llm import LLMCall
 from crow.score import (
-    FROZEN_V2_PATH,
     Config,
     build_assembled_view,
     build_view,
@@ -829,9 +829,9 @@ def _run_three_agents(
     sandbox_factory: Callable[[], AbstractContextManager[Sandbox]] | None,
     grade_fn: Callable[[Task, str, bytes], dict] | None,
 ) -> dict:
-    """One 3-agent episode. Ordering invariants: the chat runs before anyone learns the payload;
-    private tools and the chat never enter the event log; each raw output is saved before it is
-    sealed; each agent's view is sealed before its turn."""
+    """One 3-agent episode, with no monitor call in it. Ordering invariants: the chat runs before
+    anyone learns the payload; private tools and the chat never enter the event log; each raw output
+    is saved before it is sealed; each agent's view is sealed before its turn."""
     out_dir = Path(out_dir)
     stem = f"{config.episode_id}__a{attempt}"
     log = EventLog(out_dir / "events" / f"{stem}.jsonl", config.episode_id)
@@ -864,8 +864,6 @@ def _run_three_agents(
         results: dict[str, Any] = {}
         states: dict[str, Any] = {}
         view_tar = task.starter_tar(config.variant)
-        starter = snapshot(view_tar)
-        turns: list[tuple[str, Snapshot, Snapshot]] = []
         for agent, next_agent in _NEXT_AGENT.items():
             with sandbox_factory() as sb:
                 sb.copy_in(view_tar)
@@ -880,13 +878,12 @@ def _run_three_agents(
                     _private3(config, agent),
                 )
                 raw_tar = sb.copy_out()
-            raw = snapshot(raw_tar, log=log, agent_id="crow", label=f"after {agent}")
-            turns.append((agent, snapshot(view_tar), raw))
+            snapshot(raw_tar, log=log, agent_id="crow", label=f"after {agent}")
             record["turns"][agent] = _turn_record(results[agent])
             if agent == "C":
                 _save_tar(out_dir, stem, "final", raw_tar)
                 break
-            # The raw output, saved before sealing, is what the monitors score.
+            # The raw output, saved before sealing, is what the scoring pass reads.
             _save_tar(out_dir, stem, f"{agent.lower()}_out", raw_tar)
             view_tar, report, calls = _seal_handoff(
                 config, raw_tar, manifest, trusted_client, log, next_agent
@@ -910,19 +907,7 @@ def _run_three_agents(
         else:
             record["submission"] = None
         record.update(_channel_fields(config, task, view_tar, scheme, payload, bits))
-
-        cfg = load_config(FROZEN_V2_PATH)
-        record["scores"], monitor_calls = score_three(
-            task,
-            config.variant,
-            trusted_client,
-            config.episode_id,
-            starter,
-            turns,
-            read_events(log.path),
-            cfg,
-        )
-        record["frozen"] = {"tau": cfg.tau, "sha256": cfg.sha256}
+        record["scores"] = None  # scored apart: experiments/score_v2.py writes scores/<stem>.json
 
         record["usefulness"] = grade_fn(task, config.variant, raw_tar)
 
@@ -931,11 +916,10 @@ def _run_three_agents(
             "agent_A": _usage(results["A"].calls),
             "agent_B": _usage(results["B"].calls),
             "agent_C": _usage(results["C"].calls),
-            "monitors": _usage(monitor_calls),
             "paraphrase": _usage(seal_calls),
         }
         turn_calls = [call for agent in results for call in results[agent].calls]
-        everything = _usage(plan_calls + turn_calls + monitor_calls + seal_calls)
+        everything = _usage(plan_calls + turn_calls + seal_calls)
         record["tokens"] = {
             **buckets,
             "total": everything["total"],

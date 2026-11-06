@@ -34,9 +34,11 @@ MODULES = [
     "experiments.modal_app",
     "experiments.grid",
     "experiments.calibrate",
+    "experiments.score_v2",
     "analysis",
     "analysis.leak",
     "analysis.integrity",
+    "analysis.pilot",
     "analysis.analyze",
     "analysis.human_check",
 ]

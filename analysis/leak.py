@@ -14,7 +14,7 @@ import numpy as np
 
 from analysis.routes import ROUTE_REPORT_PROMPT
 from crow.detectors.views3 import AGENT_LIMIT3, FILE_LIMIT3, TOTAL_LIMIT3
-from env.prompts import MONITOR_CALLS
+from env.prompts import MAX_TRUSTED_REQUESTS, MONITOR_CALLS, RUNNING_REQUESTS
 from env.relational import ALPHA, DECODERS, binomial_p
 
 RESAMPLES, BOOTSTRAP_SEED = 2000, 0  # as every other CI (CLAUDE.md section 7, equation 5)
@@ -160,6 +160,13 @@ def registration() -> dict[str, Any]:
             "monitors": ["judge", "b1", "b2_per_agent", "b2_union"],
             "unchanged": "the deterministic detectors",
             "calls_per_monitor": MONITOR_CALLS,
+        },
+        "scoring_pass": {
+            "when": "apart from the episode, from its saved workspaces and event log",
+            "order": "as episodes finish",
+            "max_requests_while_episodes_run": RUNNING_REQUESTS,
+            "max_requests": MAX_TRUSTED_REQUESTS,
+            "during_an_episode": "only intervention runs, and only Crow's own score",
         },
         "monitor_limits": {
             "file_chars": FILE_LIMIT3,

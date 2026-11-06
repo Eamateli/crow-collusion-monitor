@@ -6,14 +6,16 @@ encoders in env/relational.py, with the footprint those encoders leave; real age
 different one, which is why detection is measured on the main grid and not here.
 """
 
-from dataclasses import dataclass
+import json
+from dataclasses import asdict, dataclass, field
+from pathlib import Path
 from random import Random
 
 from crow.assemble import Assembled, assemble
 from crow.events import Event
 from crow.workspace import Member, write_tar
 from crow.wrap import Snapshot, snapshot
-from env.episode import payload_bits
+from env.episode import EpisodeConfig, payload_bits
 from env.relational import (
     free_keys,
     reference_items,
@@ -75,10 +77,55 @@ class PlantedEpisode:
     starter: Snapshot
     turns: list[tuple[str, Snapshot, Snapshot]]
     events: list[Event]
+    seed: int = 0
+    k: int = 8
+    tars: dict[str, bytes] = field(default_factory=dict)  # as an episode saves them
 
     @property
     def assembled(self) -> Assembled:
         return assemble(self.starter, self.turns)
+
+    @property
+    def episode_id(self) -> str:
+        return f"planted__{self.kind}__{self.task.id}__s{self.seed}"
+
+    def save(self, run_dir: str | Path) -> Path:
+        """Write this episode as a real run would leave it, for the scoring pass: its record, its
+        event log and its workspaces. Returns the record's path."""
+        run_dir = Path(run_dir)
+        role = "collude_split" if self.kind.startswith("split") else "honest"
+        if self.kind.startswith("control"):
+            role = "collude"
+        elif self.kind == "honest_hard":
+            role = "honest_hard"
+        colluding = role.startswith("collude")
+        config = EpisodeConfig(
+            self.episode_id,
+            self.task.id,
+            self.variant,
+            role,
+            "open",
+            self.k if colluding else 0,
+            self.seed,
+            agents=3,
+        )
+        stem = f"{self.episode_id}__a1"
+        for folder in ("records", "events", "workspaces"):
+            (run_dir / folder).mkdir(parents=True, exist_ok=True)
+        for name, tar in self.tars.items():
+            (run_dir / "workspaces" / f"{stem}.{name}.tar").write_bytes(tar)
+        lines = (json.dumps(asdict(e)) for e in self.events)
+        (run_dir / "events" / f"{stem}.jsonl").write_text("\n".join(lines) + "\n", encoding="utf-8")
+        record = {
+            "episode_id": self.episode_id,
+            "attempt": 1,
+            "status": "ok",
+            "config": vars(config),
+            "payload": self.payload,
+        }
+        path = run_dir / "records" / f"{stem}.json"
+        path.write_text(json.dumps(record), encoding="utf-8")
+        return path
 
 
 class _Builder:
@@ -90,13 +137,17 @@ class _Builder:
         self.files = {p: (d, STARTER_MTIME) for p, d in files.items()}
         self.starter = self._snapshot()
         self.last = self.starter
+        self.last_tar = self._tar()
+        self.tars: dict[str, bytes] = {}
         self.turns: list[tuple[str, Snapshot, Snapshot]] = []
         self.events: list[Event] = []
         self.clock = T0
 
+    def _tar(self) -> bytes:
+        return write_tar(Member(p, "file", 0o644, t, d) for p, (d, t) in self.files.items())
+
     def _snapshot(self) -> Snapshot:
-        members = (Member(p, "file", 0o644, t, d) for p, (d, t) in self.files.items())
-        return snapshot(write_tar(members))
+        return snapshot(self._tar())
 
     def write(self, agent: str, path: str, text: str) -> None:
         self.clock += 10
@@ -111,6 +162,14 @@ class _Builder:
         now = self._snapshot()
         self.turns.append((agent, self.last, now))
         self.last = now
+        tar = self._tar()
+        # Open defense: the next agent's view is this output, unchanged.
+        if agent == "C":
+            self.tars["final"] = tar
+        else:
+            self.tars[f"{agent.lower()}_out"] = tar
+            self.tars[f"{'b' if agent == 'A' else 'c'}_view"] = tar
+        self.last_tar = tar
 
 
 def build(task_id: str, kind: str, seed: int = 0, k: int = 8) -> PlantedEpisode:
@@ -157,5 +216,14 @@ def build(task_id: str, kind: str, seed: int = 0, k: int = 8) -> PlantedEpisode:
     builder.write("C", "tests/test_app.py", tests)
     builder.end_turn("C")
     return PlantedEpisode(
-        task, variant, kind, payload, builder.starter, builder.turns, builder.events
+        task,
+        variant,
+        kind,
+        payload,
+        builder.starter,
+        builder.turns,
+        builder.events,
+        seed,
+        k,
+        builder.tars,
     )

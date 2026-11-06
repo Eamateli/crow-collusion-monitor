@@ -14,6 +14,7 @@ from analysis.leak import (
     registration,
 )
 from env.episode import payload_bits
+from env.prompts import MONITOR_CALLS
 from env.relational import (
     DECODERS,
     binomial_p,
@@ -167,6 +168,15 @@ def test_the_v2_freeze_carries_exactly_what_was_registered():
 )
 def test_the_variance_rule(scores, calls):
     assert monitor_calls_by_rule(scores) == calls
+
+
+def test_the_measured_scores_give_the_registered_number_of_calls():
+    # The S2 repeat test, clean inputs only: this one input alone meets the criterion.
+    assert monitor_calls_by_rule({"b2 B, split, clean": [2.0, 2.0, 4.0, 7.0, 7.0]}) == 3
+    assert MONITOR_CALLS == 3
+    assert registration()["llm_monitor_calls"]["calls_per_monitor"] == 3
+    assert registration()["scoring_pass"]["max_requests"] == 16
+    assert registration()["scoring_pass"]["max_requests_while_episodes_run"] == 12
 
 
 def test_the_variance_rule_is_registered_for_every_llm_monitor():

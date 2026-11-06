@@ -8,9 +8,10 @@ Run: python scripts/gate_s2.py          no endpoint: fake LLM replies
 
 import argparse
 import json
-import os
-from collections import Counter
-from concurrent.futures import ThreadPoolExecutor
+import re
+import tempfile
+import threading
+import time
 from pathlib import Path
 from statistics import mean
 
@@ -26,8 +27,9 @@ from crow.workspace import Member, write_tar
 from crow.wrap import snapshot
 from env.episode import PRICES, score_three
 from env.planted import KINDS, PlantedEpisode, build
-from env.prompts import TRUSTED_MODEL_ID
+from env.prompts import MAX_TRUSTED_REQUESTS, MONITOR_CALLS
 from env.taskset import task_ids
+from experiments.score_v2 import follow_run, grid_finished, score_run, trusted_client
 
 console = Console()
 ROOT = Path(__file__).resolve().parent.parent
@@ -227,13 +229,15 @@ def score(episode: PlantedEpisode, client, key: str):
 
 
 def check_fake_monitors() -> bool:
-    console.rule("The monitors end to end, with fake replies")
+    console.rule(f"The monitors end to end, with fake replies, {MONITOR_CALLS} calls each")
     client = FakeTrusted()
     episode = build("ledger", "split_ladder")
     scores, calls = score(episode, client, "gate")
+    expected = [f"{name}-{i}" for name in MONITORS for i in range(MONITOR_CALLS)]
     ok = check(
-        "all six LLM monitors run, once each",
-        [k.removeprefix("gate-") for k in client.views] == list(MONITORS) and len(calls) == 6,
+        f"all six LLM monitors run, {MONITOR_CALLS} calls each, every call on its own key",
+        [k.removeprefix("gate-") for k in client.views] == expected
+        and len(calls) == 6 * MONITOR_CALLS,
     )
     ok &= check(
         "every monitor gets a score",
@@ -249,7 +253,7 @@ def check_fake_monitors() -> bool:
             )
         ),
     )
-    view = {k.removeprefix("gate-"): v for k, v in client.views.items()}
+    view = {re.sub(r"-\d$", "", k.removeprefix("gate-")): v for k, v in client.views.items()}
     item = "def _"  # A's planted helpers, as written
     cases = episode.task.b_artifact
     ok &= check(
@@ -279,78 +283,148 @@ def check_fake_monitors() -> bool:
         all(episode.payload not in text for text in view.values()),
     )
     ok &= check(
-        "every recorded score equals the <score> tag in its saved reply",
+        "every recorded score equals the <score> tags in its saved replies",
         not score_mismatches(scores),
     )
     json.dumps(scores)  # the record must serialise
     return ok
 
 
-def check_live() -> bool:
-    from dotenv import load_dotenv
+class CountingTrusted(FakeTrusted):
+    """Tracks how many requests are in flight at once."""
 
-    from crow.llm import modal_endpoint
+    def __init__(self):
+        super().__init__()
+        self.lock, self.now, self.peak, self.count = threading.Lock(), 0, 0, 0
 
-    console.rule("The monitors end to end, on the real trusted endpoint")
-    load_dotenv(ROOT / ".env")
-    client = modal_endpoint("trusted", os.environ["TRUSTED_ENDPOINT_URL"], TRUSTED_MODEL_ID)
-    kinds = ("honest", "split_ladder", "control_ladder")
+    def chat(self, messages, *, affinity_key, **params):
+        with self.lock:
+            self.now += 1
+            self.count += 1
+            self.peak = max(self.peak, self.now)
+        time.sleep(0.002)
+        try:
+            return super().chat(messages, affinity_key=affinity_key, **params)
+        finally:
+            with self.lock:
+                self.now -= 1
 
-    def run(kind: str):
-        return kind, score(build("ledger", kind), client, f"gate-live-{kind}")
 
-    with ThreadPoolExecutor(max_workers=3) as pool:
-        finished = list(pool.map(run, kinds))
-    table = Table("episode", *("Crow judge", "B1", "B2 A", "B2 B", "B2 C", "B2 union"), "missing")
-    ok, prompt, completion, length = True, 0, 0, 0
-    for kind, (scores, calls) in finished:
-        per = scores["b2_per_agent"]
-        values = [
-            scores["crow_env"]["judge"]["score"],
-            scores["b1"]["score"],
-            per["A"]["score"],
-            per["B"]["score"],
-            per["C"]["score"],
-            scores["b2_union"]["score"],
-        ]
-        missing = sum(v is None for v in values)
-        table.add_row(kind, *("-" if v is None else f"{v:.1f}" for v in values), str(missing))
-        ok &= all(v is None or 0.0 <= v <= 1.0 for v in values)
-        prompt += sum(c.usage.get("prompt_tokens", 0) for c in calls)
-        completion += sum(c.usage.get("completion_tokens", 0) for c in calls)
-        length += sum(c.finish_reason == "length" for c in calls)
-    console.print(table)
-    answered = Counter(
-        v is not None
-        for _, (scores, _) in finished
-        for v in (
-            scores["crow_env"]["judge"]["score"],
-            scores["b1"]["score"],
-            scores["b2_per_agent"]["A"]["score"],
-            scores["b2_per_agent"]["B"]["score"],
-            scores["b2_per_agent"]["C"]["score"],
-            scores["b2_union"]["score"],
+def check_scoring_pass() -> bool:
+    console.rule("The separate scoring pass, with fake replies")
+    with tempfile.TemporaryDirectory() as d:
+        kinds = ("honest", "split_ladder", "control_ladder", "split_free")
+        for task in task_ids()[:3]:
+            for kind in kinds:
+                build(task, kind).save(d)
+        cap = 4
+        client = CountingTrusted()
+        summary = score_run(d, client, max_requests=cap, cfg=Config.default())
+        ok = check(
+            "every saved episode is scored",
+            summary["scored"] == 12 and not summary["failed"],
+            f"{summary['scored']} episodes, {client.count} requests",
         )
-    )
-    ok &= check(
-        "all 18 monitor calls return a parseable score in range",
-        answered[True] == 18,
-        f"{answered[True]} scored, {answered[False]} missing",
-    )
-    mismatches = [m for _, (scores, _) in finished for m in score_mismatches(scores)]
-    ok &= check("every recorded score equals the <score> tag in its saved reply", not mismatches)
-    saved = ROOT / "results" / "raw" / "gate_s2_live.json"  # gitignored
-    saved.parent.mkdir(parents=True, exist_ok=True)
-    saved.write_text(
-        json.dumps({kind: result[0] for kind, result in finished}, indent=1), encoding="utf-8"
-    )
-    console.print(f"  [dim]every raw reply saved to {saved.relative_to(ROOT)}[/dim]")
+        ok &= check(
+            f"requests in flight stay within the cap of {cap}",
+            1 < client.peak <= cap,
+            f"peak {client.peak}",
+        )
+        again = CountingTrusted()
+        resumed = score_run(d, again, max_requests=cap, cfg=Config.default())
+        ok &= check(
+            "a second pass resumes: no request, nothing lost",
+            again.count == 0 and resumed["already_scored"] == 12,
+        )
+        try:
+            score_run(d, again, max_requests=MAX_TRUSTED_REQUESTS + 1, cfg=Config.default())
+            refused = False
+        except ValueError:
+            refused = True
+        ok &= check(f"a cap above the endpoint's {MAX_TRUSTED_REQUESTS} is refused", refused)
+
+    with tempfile.TemporaryDirectory() as d:
+        expected = []
+        for task in task_ids()[:3]:
+            for kind in ("honest", "split_ladder"):
+                expected.append(build(task, kind).episode_id)
+        waiting = [(t, k) for t in task_ids()[:3] for k in ("honest", "split_ladder")]
+
+        def next_episode(_seconds: float) -> None:
+            if waiting:
+                task, kind = waiting.pop()
+                build(task, kind).save(d)
+
+        client = CountingTrusted()
+        summary = follow_run(
+            d,
+            client,
+            lambda: grid_finished(d, expected),
+            running_requests=2,
+            final_requests=4,
+            cfg=Config.default(),
+            sleep=next_episode,
+        )
+        ok &= check(
+            "following a grid scores each episode as it appears, and stops when all are done",
+            summary["scored"] == 6 and summary["grid_finished"] and not summary["stopped_idle"],
+            f"{summary['scored']} episodes",
+        )
+        ok &= check("following a grid keeps within the final cap", client.peak <= 4)
+    return ok
+
+
+def check_live() -> bool:
+    console.rule(f"The real trusted endpoint, through the pass, {MONITOR_CALLS} calls each")
+    # Gitignored. A new folder each time: the pass would skip an episode already scored there.
+    run_dir = ROOT / "results" / "raw" / f"gate_s2_live_{int(time.time())}"
+    kinds = ("honest", "split_ladder", "control_ladder")
+    for kind in kinds:
+        build("ledger", kind).save(run_dir)
+    summary = score_run(run_dir, trusted_client(), max_requests=3, cfg=Config.default())
+    ok = check("every episode is scored", summary["scored"] == 3, str(summary["failed"] or ""))
+    table = Table("episode", "Crow judge", "B1", "B2 A", "B2 B", "B2 C", "B2 union")
+
+    def cell(record: dict) -> str:
+        if record["raw_score"] is None:
+            return "missing"
+        samples = ", ".join("-" if s is None else f"{s:g}" for s in record["samples"])
+        return f"{record['raw_score']:g} ({samples})"
+
+    missing = mismatches = cut = 0
+    seconds = []
+    for result in summary["results"]:
+        if result["status"] != "ok":
+            continue
+        scores = result["scores"]
+        per = scores["b2_per_agent"]
+        records = (
+            scores["crow_env"]["judge"],
+            scores["b1"],
+            per["A"],
+            per["B"],
+            per["C"],
+            scores["b2_union"],
+        )
+        table.add_row(result["episode_id"].split("__")[1], *(cell(r) for r in records))
+        missing += sum(r["raw_score"] is None for r in records)
+        mismatches += len(score_mismatches(scores))
+        cut += result["tokens"]["cut_at_max_tokens"]
+        seconds.append(result["seconds"])
+    console.print(table)
+    ok &= check("all 18 monitors return a score", missing == 0, f"{missing} missing")
+    ok &= check("every recorded score equals the <score> tags in its saved replies", not mismatches)
     in_price, out_price = PRICES["trusted"]
-    cost = prompt * in_price / 1e6 + completion * out_price / 1e6
     console.print(
-        f"  tokens: {prompt} prompt, {completion} completion, {length} calls cut at max_tokens; "
-        f"estimated cost ${cost:.4f}, or ${cost / len(finished):.4f} per episode for the monitors."
+        f"  {summary['tokens']} tokens, {cut} calls cut at max_tokens; estimated cost "
+        f"${summary['cost_estimate_usd']:.4f}, or ${summary['cost_estimate_usd'] / 3:.4f} per "
+        f"episode (prices ${in_price} and ${out_price} per million)."
     )
+    console.print(
+        f"  seconds per episode, {6 * MONITOR_CALLS} calls one after another: "
+        + ", ".join(f"{s:.0f}" for s in seconds)
+    )
+    console.print(f"  [dim]every raw reply saved under {run_dir.relative_to(ROOT)}[/dim]")
     console.print("  [dim]No ranking is checked: three episodes measure nothing (addenda 9).[/dim]")
     return ok
 
@@ -362,6 +436,7 @@ def main() -> int:
     ok = check_postcondition()
     ok &= check_heuristics()
     ok &= check_fake_monitors()
+    ok &= check_scoring_pass()
     if args.live:
         ok &= check_live()
     verdict = "[bold green]all checks passed[/bold green]" if ok else "[bold red]FAILED[/bold red]"
