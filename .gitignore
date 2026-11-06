@@ -34,6 +34,13 @@ Thumbs.db
 # Local build plan
 BUILD_PLAN.md
 
+# Local-only working files (kept on disk, not published)
+CLAUDE.md
+CHANGELOG.md
+.claude/settings.json
+scripts/show_prompts.py
+.gitkeep
+
 # Route labeling: never publish raw planning chats or report_method texts (CLAUDE.md section 10).
 # Only the route labels (channel codes) reach numbers.json. These working files hold chat text
 # or the model's reasoning about it, so they stay local.

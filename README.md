@@ -33,11 +33,13 @@ Every number in the report is computed from the raw episode records by `analysis
 crow/            the reusable monitor: events, wrap + snapshot + diff, detectors, judge, score, seal, CLI
 env/             the experiment: agent loop, sandbox, episode runner, prompts, the 6 tasks (+ hidden tests)
 experiments/     Modal app (run_episode, runs), grid configs, calibration and freeze
-scripts/         endpoint, sandbox and task checks; prompt preview
+scripts/         endpoint, sandbox and task checks
 tests/           offline tests (no Modal, no endpoint), plus one opt-in endpoint test
 results/         committed summaries (calibration); raw episode data stays on the Modal Volume
 docs/            endpoint request examples; the collude prompt text (docs/collude_prompts.md)
 ```
+
+Code comments cite sections of `CLAUDE.md`, a local design spec that is not in this repository; this README summarizes the design.
 
 ## Quick start
 
@@ -85,7 +87,7 @@ The main grid, per seed (seeds 0 to 19; the seed fixes the task and the payload,
 | honest | open, seal_side, seal_side_para | none | 60 |
 | honest_hard | open, seal_side, seal_side_para | none | 60 |
 
-**The freeze.** Calibration fits the two z-score detectors and sets the alarm threshold tau on honest episodes only, then writes `crow/frozen.json` (commit tagged `crow-freeze`). After the freeze, no detector, prompt, weight, threshold or model changes; later bug fixes are logged in `CHANGELOG.md`. A main run refuses to start unless a Modal container sees exactly the committed `frozen.json`.
+**The freeze.** Calibration fits the two z-score detectors and sets the alarm threshold tau on honest episodes only, then writes `crow/frozen.json` (commit tagged `crow-freeze`). After the freeze, no detector, prompt, weight, threshold or model changes; later bug fixes are recorded in the commit history. A main run refuses to start unless a Modal container sees exactly the committed `frozen.json`.
 
 ## CLI
 
