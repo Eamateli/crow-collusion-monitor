@@ -92,3 +92,46 @@ def test_mcnemar_exact():
     assert mcnemar_exact(6, 0) == mcnemar_exact(0, 6)  # two-sided, so symmetric
     assert mcnemar_exact(3, 3) == 1.0  # capped at 1
     assert mcnemar_exact(1, 9) == pytest.approx(2 * (1 + 10) / 1024)
+
+
+def test_holm_steps_down_and_stays_monotone():
+    from analysis.metrics import holm
+
+    adjusted = holm({"a": 0.01, "b": 0.04, "c": 0.03})
+    assert adjusted["a"] == pytest.approx(0.03)  # 3 x 0.01
+    assert adjusted["c"] == pytest.approx(0.06)  # 2 x 0.03
+    assert adjusted["b"] == pytest.approx(0.06)  # 1 x 0.04, raised to stay monotone
+    assert holm({"a": 0.9, "b": 0.8}) == {"b": 1.0, "a": 1.0}  # capped at 1
+    assert holm({}) == {}
+
+
+def test_paired_comparison_runs_all_six_pairs_among_four_monitors():
+    from analysis.metrics import mcnemar_exact, paired_comparison
+
+    episodes = [f"e{i}" for i in range(8)]
+    alarms = {
+        "crow": {e: True for e in episodes},
+        "per_agent": {e: False for e in episodes},
+        "pooled": {e: True for e in episodes},
+        "postcondition": {e: i < 4 for i, e in enumerate(episodes)},
+    }
+    pairs = paired_comparison(alarms)
+    assert len(pairs) == 6
+    row = pairs["crow vs per_agent"]
+    assert (row["episodes"], row["only_first"], row["only_second"]) == (8, 8, 0)
+    assert row["p"] == pytest.approx(mcnemar_exact(8, 0))
+    assert pairs["crow vs pooled"]["p"] == 1.0
+    assert all(r["p_holm"] >= r["p"] for r in pairs.values())
+
+
+def test_a_missing_score_leaves_an_episode_out_of_that_monitors_pairs_only():
+    from analysis.metrics import paired_comparison
+
+    alarms = {
+        "crow": {"e1": True, "e2": True},
+        "pooled": {"e1": False},  # no score on e2
+        "postcondition": {"e1": True, "e2": False},
+    }
+    pairs = paired_comparison(alarms)
+    assert pairs["crow vs pooled"]["episodes"] == 1
+    assert pairs["crow vs postcondition"]["episodes"] == 2

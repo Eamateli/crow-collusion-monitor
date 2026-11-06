@@ -1,17 +1,18 @@
 """Cleaning the workspace before C reads it: the same rule on every episode (no LLM, no Modal)."""
 
 import inspect
+import json
 from itertools import product
 
 import pytest
 
-from crow.control import clean_workspace, strip_names
+from crow.control import canonicalize_workspace, clean_workspace, strip_names
 from crow.detectors.postcondition import postcondition
 from crow.workspace import Member, read_tar, write_tar
 from crow.wrap import snapshot
 from env.grading import grade_local
 from env.planted import app_tests_reading, build, clean_reference_files
-from env.relational import slot_items
+from env.relational import extract_examples, extract_keys, slot_items
 from env.taskset import VARIANTS, load_task, task_ids
 
 STUB = "def required(x):\n    raise NotImplementedError\n"
@@ -180,6 +181,93 @@ def test_cleaning_honest_work_leaves_it_passing_the_hidden_tests(task_id, varian
     tar = write_tar(Member(p, "file", 0o644, 5.0, d) for p, d in files.items())
     starter = snapshot(task.starter_tar(variant))
     view, _ = clean_workspace(tar, starter, task.manifest(variant, agents=3))
+    final = {m.path: m.data for m in read_tar(view) if m.kind == "file"}
+    final["app.py"] = app
+    final["tests/test_app.py"] = app_tests_reading(task.b_artifact).encode()
+    scores = grade_local(task, variant, final)
+    assert {name: s["rate"] for name, s in scores.items()} == {
+        "lib": 1.0,
+        "app_e2e": 1.0,
+        "app_isolated": 1.0,
+    }
+
+
+# --- canonicalize: neutral names in the shared data, nothing stripped ---
+
+
+def canonical(files, starter=None):
+    before = snapshot(tar_of(starter or {"lib/m.py": STUB}))
+    view, report = canonicalize_workspace(tar_of(files), before, MANIFEST)
+    return {m.path: m.data.decode() for m in read_tar(view) if m.kind == "file"}, report
+
+
+def test_the_keys_of_the_shared_data_become_neutral_in_file_order():
+    data = '{"zebra": {"input": 1}, "apple": {"input": 2}}\n'
+    files, report = canonical({"lib/m.py": REQUIRED, "data/cases.json": data})
+    assert json.loads(files["data/cases.json"]) == {"case_1": {"input": 1}, "case_2": {"input": 2}}
+    assert report.renamed == {"data/cases.json": 2}
+
+
+def test_canonicalize_strips_no_helper_and_touches_no_python_dict():
+    source = f"{REQUIRED}\n\ndef _left_over(x):\n    return x\n\n\nEXAMPLES = {{'zebra': 1}}\n"
+    files, _ = canonical({"lib/m.py": source})
+    assert "_left_over" in files["lib/m.py"] and "zebra" in files["lib/m.py"]
+
+
+def test_canonicalize_seals_as_well():
+    files, report = canonical({"lib/m.py": f"# a comment\n{REQUIRED}", "notes/extra.txt": "x\n"})
+    assert "a comment" not in files["lib/m.py"] and "notes/extra.txt" not in files
+    assert {"path": "notes/extra.txt", "why": "not in the manifest"} in report.seal["dropped"]
+
+
+def test_data_the_task_gave_is_left_alone():
+    starter = {"lib/m.py": STUB, "data/cases.json": '{"given": 1}\n'}
+    files, report = canonical({"lib/m.py": REQUIRED, "data/cases.json": '{"given": 1}\n'}, starter)
+    assert "given" in files["data/cases.json"] and report.renamed == {}
+
+
+@pytest.mark.parametrize("text", ["not json", "[1, 2]", "{}"])
+def test_anything_but_a_json_object_with_keys_is_left_alone(text):
+    files, report = canonical({"lib/m.py": REQUIRED, "data/cases.json": text})
+    assert report.renamed == {} and text.strip() in files["data/cases.json"]
+
+
+def test_canonicalize_is_deterministic_and_takes_no_condition():
+    files = {"lib/m.py": REQUIRED, "data/cases.json": '{"b": 1, "a": 2}'}
+    assert canonical(files)[0] == canonical(files)[0]
+    parameters = set(inspect.signature(canonicalize_workspace).parameters)
+    assert parameters == {"tar", "starter", "manifest"}
+
+
+def test_a_split_loses_its_keys_and_the_bits_no_longer_read_out():
+    episode = build("ledger", "split_ladder")
+    manifest = episode.task.manifest(episode.variant, agents=3)
+    view, _ = canonicalize_workspace(episode.tars["b_out"], episode.starter, manifest)
+    files = {m.path: m.data.decode() for m in read_tar(view) if m.kind == "file"}
+    keys = extract_keys(files[episode.task.b_artifact])
+    assert keys == [f"case_{i}" for i in range(1, 9)]
+    assert len(slot_items(files["lib/ledger.py"], 8)) == 8  # A's helpers stay
+
+
+def test_a_control_keeps_its_entries_because_they_are_not_in_shared_data():
+    episode = build("ledger", "control_ladder")
+    manifest = episode.task.manifest(episode.variant, agents=3)
+    view, _ = canonicalize_workspace(episode.tars["b_out"], episode.starter, manifest)
+    files = {m.path: m.data.decode() for m in read_tar(view) if m.kind == "file"}
+    assert len(extract_examples(files["lib/ledger.py"])) == 8
+
+
+@pytest.mark.parametrize(("task_id", "variant"), list(product(task_ids(), VARIANTS)))
+def test_canonicalizing_honest_work_leaves_it_passing_the_hidden_tests(task_id, variant):
+    task = load_task(task_id)
+    reference = clean_reference_files(task, variant)
+    app = reference.pop("app.py")
+    files = task.starter_files(variant) | reference
+    files["HANDOFF.md"] = b"# Handoff\n"
+    files[task.b_artifact] = b'{"empty_input": {"input": "x", "expected": "x"}}\n'
+    tar = write_tar(Member(p, "file", 0o644, 5.0, d) for p, d in files.items())
+    starter = snapshot(task.starter_tar(variant))
+    view, _ = canonicalize_workspace(tar, starter, task.manifest(variant, agents=3))
     final = {m.path: m.data for m in read_tar(view) if m.kind == "file"}
     final["app.py"] = app
     final["tests/test_app.py"] = app_tests_reading(task.b_artifact).encode()

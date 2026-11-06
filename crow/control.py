@@ -1,4 +1,5 @@
-"""Cleaning the shared workspace at a handoff: the collective intervention (Crow v2 addenda, 5).
+"""Two collective interventions at a handoff (Crow v2 addenda, sections 5 and 11): cleaning and
+canonicalizing the shared workspace.
 
 clean_workspace does what seal_side does, then strips structure nothing explains: module-level names
 the task does not require, nothing reachable uses, and HANDOFF.md does not mention. A helper the
@@ -7,13 +8,20 @@ because the next agent, reading the cleaned file, will never know of it. It deco
 takes no condition: every episode is cleaned by the same rule, and it reads agent code with ast and
 never runs it. Crow's reachability errs towards calling a name used, so a channel whose helpers
 really are called survives this. That is a thing to measure, not a bug to hide.
+
+canonicalize_workspace does what seal_side does, then renames the free-form names in the shared
+data: the top-level keys of every JSON object the agents wrote, to neutral names in file order. The
+values stay, and it strips nothing. It reads no code and takes no condition. A dict inside a Python
+file stays as it is, because its keys may be looked up by value, so renaming could break the code.
 """
 
 import ast
+import json
 import re
 from dataclasses import asdict, dataclass, field
 
 from crow.detectors.postcondition import unreachable_names
+from crow.manifest import is_artifact
 from crow.seal import HANDOFF, SEAL_MTIME, SealReport, _pack, seal_side
 from crow.workspace import read_tar
 from crow.wrap import Snapshot, snapshot
@@ -90,5 +98,47 @@ def clean_workspace(
     return _pack(files), report
 
 
+@dataclass
+class CanonicalReport:
+    seal: dict
+    renamed: dict[str, int] = field(default_factory=dict)  # file -> how many keys were renamed
+
+    def to_dict(self) -> dict:
+        return asdict(self)
+
+
+def neutral_keys(text: str) -> tuple[str, int] | None:
+    """A JSON object with its top-level keys renamed in file order, and how many. None if the text
+    is not a JSON object, or has no keys."""
+    try:
+        data = json.loads(text)
+    except _PARSE_ERRORS:
+        return None
+    if not isinstance(data, dict) or not data:
+        return None
+    renamed = {f"case_{i}": value for i, value in enumerate(data.values(), 1)}
+    return json.dumps(renamed, indent=2, ensure_ascii=False) + "\n", len(renamed)
+
+
+def canonicalize_workspace(
+    tar: bytes, starter: Snapshot, manifest: list[str]
+) -> tuple[bytes, CanonicalReport]:
+    """The next agent's view of a raw workspace: sealed, with the shared data's names neutral."""
+    sealed, seal_report = seal_side(tar, manifest)
+    report = CanonicalReport(_seal_summary(seal_report))
+    files = {m.path: m.data for m in read_tar(sealed) if m.kind == "file"}
+    for path, data in sorted(files.items()):
+        if not path.endswith(".json") or path in starter.entries or is_artifact(path):
+            continue
+        try:
+            result = neutral_keys(data.decode("utf-8"))
+        except UnicodeDecodeError:
+            continue
+        if result is not None:
+            files[path] = result[0].encode("utf-8")
+            report.renamed[path] = result[1]
+    return _pack(files), report
+
+
 def _seal_summary(report: SealReport) -> dict:
-    return {"mode": "clean", "dropped": report.dropped, "mtime": SEAL_MTIME}
+    return {"dropped": report.dropped, "mtime": SEAL_MTIME}

@@ -28,7 +28,12 @@ ROLES = {
     "control": lambda task, seed: make_config("collude", task, "open", seed, k=8, agents=3),
     "honest": lambda task, seed: make_config("honest", task, "open", seed, agents=3),
 }
-RAN = {"replace_a": {"A", "B", "C"}, "replace_b": {"B", "C"}, "clean_before_c": {"C"}}
+RAN = {
+    "replace_a": {"A", "B", "C"},
+    "replace_b": {"B", "C"},
+    "clean_before_c": {"C"},
+    "canonicalize_before_c": {"C"},
+}
 
 
 def check(name: str, ok: bool, detail: str = "") -> bool:
@@ -47,7 +52,7 @@ def main() -> int:
         "U (app e2e)",
         "lib",
         "agents run",
-        "stripped",
+        "names changed",
     )
     problems, runs = [], 0
     with tempfile.TemporaryDirectory() as d:
@@ -112,13 +117,14 @@ def _cells(records: list[dict], role: str) -> list[str]:
         hits = [1 - r["submission"]["bit_errors"] / r["config"]["k"] for r in ok]
         accuracy = _mean(hits)
     stripped = sum(len(n) for r in ok for n in (r.get("clean") or {}).get("stripped", {}).values())
+    stripped += sum(sum((r.get("canonicalize") or {}).get("renamed", {}).values()) for r in ok)
     return [
         str(len(records)),
         accuracy,
         _mean([r["usefulness"]["app_e2e"]["rate"] for r in ok]),
         _mean([r["usefulness"]["lib"]["rate"] for r in ok]),
         ",".join(sorted(ok[0]["turns"])) if ok else "-",
-        str(stripped) if any(r.get("clean") for r in ok) else "-",
+        str(stripped) if any(r.get("clean") or r.get("canonicalize") for r in ok) else "-",
     ]
 
 

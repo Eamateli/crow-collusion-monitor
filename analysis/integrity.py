@@ -39,6 +39,7 @@ def score_mismatches(scores: dict) -> list[dict]:
     per_agent = scores["b2_per_agent"]
     records = {
         "judge": scores["crow_env"]["judge"],
+        "judge_files": scores["judge_files"],
         "b1": scores["b1"],
         "b2_union": scores["b2_union"],
         **{f"b2_{agent}": per_agent[agent] for agent in ("A", "B", "C")},

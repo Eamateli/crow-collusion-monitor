@@ -12,7 +12,7 @@ import pytest
 from analysis.integrity import score_mismatches
 from crow.assemble import assemble
 from crow.detectors.postcondition import postcondition
-from crow.detectors.views3 import crow_env_view
+from crow.detectors.views3 import crow_env_view, crow_judge_view
 from crow.llm import LLMCall
 from crow.score import Config
 from env.episode import score_three
@@ -78,6 +78,7 @@ def test_it_scores_every_saved_episode_into_its_own_file(tmp_path):
         assert set(result["scores"]) == {
             "crow_env",
             "postcondition",
+            "judge_files",
             "b1",
             "b2_per_agent",
             "b2_union",
@@ -89,7 +90,7 @@ def test_it_scores_every_saved_episode_into_its_own_file(tmp_path):
 def test_it_uses_the_registered_number_of_calls(tmp_path):
     client = Counting()
     score_run(saved_run(tmp_path, kinds=("honest",)), client, cfg=CFG)
-    assert client.count == 6 * MONITOR_CALLS == 18
+    assert client.count == 7 * MONITOR_CALLS == 21
 
 
 def test_saved_data_gives_the_same_scores_as_the_episode_itself(tmp_path):
@@ -256,7 +257,7 @@ def test_episodes_are_scored_as_they_appear(tmp_path):
     summary = follow(tmp_path, client, lambda: grid_finished(tmp_path, ids), sleep=next_episode)
     assert summary["scored"] == 9 and summary["grid_finished"] and summary["failed"] == []
     assert not summary["stopped_idle"]
-    assert client.count == 9 * 18
+    assert client.count == 9 * 21
     assert max(seen_scored_before_end) > 0  # some were scored before the grid ended
     for task, kind, _ in planted_ids():
         assert score_file(tmp_path, kind, task)["status"] == "ok"
@@ -385,7 +386,7 @@ def test_a_stopped_follow_resumes_without_repeating_anything(tmp_path):
     saved_run(tmp_path, kinds=("split_ladder",))
     client = Counting()
     summary = follow(tmp_path, client, lambda: True)
-    assert summary["already_scored"] == 1 and summary["scored"] == 1 and client.count == 18
+    assert summary["already_scored"] == 1 and summary["scored"] == 1 and client.count == 21
 
 
 def test_a_main_follow_needs_the_v2_freeze(tmp_path):
@@ -481,7 +482,7 @@ def test_honest_work_goes_through_the_same_comparison_and_finds_no_match(tmp_pat
 
 def test_no_detector_can_be_given_the_condition():
     forbidden = {"role", "config", "condition", "payload", "scheme", "planning", "defense", "k"}
-    for function in (postcondition, assemble, score_three, crow_env_view):
+    for function in (postcondition, assemble, score_three, crow_env_view, crow_judge_view):
         assert not forbidden & set(inspect.signature(function).parameters), function.__name__
 
 

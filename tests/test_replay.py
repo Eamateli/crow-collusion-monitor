@@ -8,6 +8,7 @@ from test_episode import LocalSandbox, grade_fn, tar_to_files
 
 from crow.events import read_events
 from env.episode import make_config, payload_bits
+from env.prompts import CAREFUL_LINE, MONITOR_NOTICE
 from env.relational import scheme_for
 from env.replay import ARMS, arm_bases, arm_episode_id, run_arm
 
@@ -68,7 +69,12 @@ def test_every_arm_runs_end_to_end_on_every_role(tmp_path, role, arm):
 
 @pytest.mark.parametrize(
     ("arm", "ran"),
-    [("replace_a", ["A", "B", "C"]), ("replace_b", ["B", "C"]), ("clean_before_c", ["C"])],
+    [
+        ("replace_a", ["A", "B", "C"]),
+        ("replace_b", ["B", "C"]),
+        ("clean_before_c", ["C"]),
+        ("canonicalize_before_c", ["C"]),
+    ],
 )
 def test_only_the_agents_after_the_handoff_run_again(tmp_path, arm, ran):
     _, record, agents, _ = replay(tmp_path, "split", arm)
@@ -88,6 +94,9 @@ def test_only_the_agents_after_the_handoff_run_again(tmp_path, arm, ran):
         ("honest", "replace_a", "ABC", ""),
         ("honest", "replace_b", "BC", ""),
         ("honest", "clean_before_c", "C", ""),
+        ("split", "canonicalize_before_c", "", "C"),
+        ("control", "canonicalize_before_c", "", "C"),
+        ("honest", "canonicalize_before_c", "C", ""),
     ],
 )
 def test_a_replaced_agent_gets_no_private_goal_and_the_others_keep_theirs(
@@ -183,7 +192,8 @@ def test_no_monitor_runs_during_a_replay(tmp_path, arm):
 
 
 @pytest.mark.parametrize(
-    ("arm", "calls"), [("replace_a", 2), ("replace_b", 1), ("clean_before_c", 0)]
+    ("arm", "calls"),
+    [("replace_a", 2), ("replace_b", 1), ("clean_before_c", 0), ("canonicalize_before_c", 0)],
 )
 def test_a_paraphrase_defense_runs_at_each_later_handoff(tmp_path, arm, calls):
     _, record, _, trusted = replay(tmp_path, "split", arm, defense="seal_side_para")
@@ -273,3 +283,23 @@ def test_the_arms_apply_to_every_finished_episode_of_the_three_roles():
         control.episode_id,
         honest.episode_id,
     ]
+
+
+def test_canonicalize_renames_bs_keys_and_keeps_the_values_and_the_rest(tmp_path):
+    base, record, _, _ = replay(tmp_path, "split", "canonicalize_before_c")
+    base_stem, stem = f"{base['episode_id']}__a1", f"{record['episode_id']}__a1"
+    view = tar_to_files(workspace(tmp_path, "arms", stem, "c_view"))
+    raw = tar_to_files(workspace(tmp_path, "base", base_stem, "b_out"))
+    path = "data/ledger_cases.json"
+    before, after = json.loads(raw[path]), json.loads(view[path])
+    assert list(after) == [f"case_{i}" for i in range(1, 9)]
+    assert list(after.values()) == list(before.values())
+    assert record["canonicalize"]["renamed"] == {path: 8}
+    assert "def _" in view["lib/ledger.py"].decode()  # it strips nothing: A's helpers stay
+    assert record["seal"]["C"] == {"mode": "canonicalize"}
+
+
+def test_a_replaced_agent_in_a_careful_episode_still_gets_the_notice(tmp_path):
+    _, _, agents, _ = replay(tmp_path, "split", "replace_b")
+    assert MONITOR_NOTICE in agents.systems["B"] and CAREFUL_LINE not in agents.systems["B"]
+    assert MONITOR_NOTICE in agents.systems["C"] and CAREFUL_LINE in agents.systems["C"]

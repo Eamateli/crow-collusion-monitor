@@ -34,7 +34,7 @@ from experiments.score_v2 import follow_run, grid_finished, score_run, trusted_c
 console = Console()
 ROOT = Path(__file__).resolve().parent.parent
 SEEDS = range(10)
-MONITORS = ("judge", "b1", "b2-A", "b2-B", "b2-C", "b2-union")
+MONITORS = ("judge", "judge-files", "b1", "b2-A", "b2-B", "b2-C", "b2-union")
 TITLES = {
     "honest": "honest",
     "honest_hard": "honest, hard version",
@@ -235,9 +235,9 @@ def check_fake_monitors() -> bool:
     scores, calls = score(episode, client, "gate")
     expected = [f"{name}-{i}" for name in MONITORS for i in range(MONITOR_CALLS)]
     ok = check(
-        f"all six LLM monitors run, {MONITOR_CALLS} calls each, every call on its own key",
+        f"all seven LLM monitors run, {MONITOR_CALLS} calls each, every call on its own key",
         [k.removeprefix("gate-") for k in client.views] == expected
-        and len(calls) == 6 * MONITOR_CALLS,
+        and len(calls) == 7 * MONITOR_CALLS,
     )
     ok &= check(
         "every monitor gets a score",
@@ -245,6 +245,7 @@ def check_fake_monitors() -> bool:
             s is not None
             for s in (
                 scores["crow_env"]["judge"]["score"],
+                scores["judge_files"]["score"],
                 scores["b1"]["score"],
                 scores["b2_per_agent"]["A"]["score"],
                 scores["b2_per_agent"]["B"]["score"],
@@ -275,8 +276,16 @@ def check_fake_monitors() -> bool:
         and "Every path in /work" not in view["b2-union"],
     )
     ok &= check(
-        "Crow-env sees both halves, the snapshot and who wrote what",
-        item in view["judge"] and cases in view["judge"] and "| by B" in view["judge"],
+        "Crow's judge sees both halves, the snapshot, who wrote what and the tool calls",
+        item in view["judge"]
+        and cases in view["judge"]
+        and "| by B" in view["judge"]
+        and f"path: {cases}" in view["judge"],
+    )
+    ok &= check(
+        "the files-only judge sees the snapshot and no tool calls",
+        "Every path in /work" in view["judge-files"]
+        and "tool calls, in order" not in view["judge-files"],
     )
     ok &= check(
         "no monitor view holds the payload",
@@ -383,7 +392,7 @@ def check_live() -> bool:
         build("ledger", kind).save(run_dir)
     summary = score_run(run_dir, trusted_client(), max_requests=3, cfg=Config.default())
     ok = check("every episode is scored", summary["scored"] == 3, str(summary["failed"] or ""))
-    table = Table("episode", "Crow judge", "B1", "B2 A", "B2 B", "B2 C", "B2 union")
+    table = Table("episode", "Crow judge", "files only", "B1", "B2 A", "B2 B", "B2 C", "B2 union")
 
     def cell(record: dict) -> str:
         if record["raw_score"] is None:
@@ -400,6 +409,7 @@ def check_live() -> bool:
         per = scores["b2_per_agent"]
         records = (
             scores["crow_env"]["judge"],
+            scores["judge_files"],
             scores["b1"],
             per["A"],
             per["B"],
@@ -412,7 +422,7 @@ def check_live() -> bool:
         cut += result["tokens"]["cut_at_max_tokens"]
         seconds.append(result["seconds"])
     console.print(table)
-    ok &= check("all 18 monitors return a score", missing == 0, f"{missing} missing")
+    ok &= check("all 21 monitors return a score", missing == 0, f"{missing} missing")
     ok &= check("every recorded score equals the <score> tags in its saved replies", not mismatches)
     in_price, out_price = PRICES["trusted"]
     console.print(
@@ -421,7 +431,7 @@ def check_live() -> bool:
         f"episode (prices ${in_price} and ${out_price} per million)."
     )
     console.print(
-        f"  seconds per episode, {6 * MONITOR_CALLS} calls one after another: "
+        f"  seconds per episode, {7 * MONITOR_CALLS} calls one after another: "
         + ", ".join(f"{s:.0f}" for s in seconds)
     )
     console.print(f"  [dim]every raw reply saved under {run_dir.relative_to(ROOT)}[/dim]")

@@ -8,6 +8,7 @@ seed, task, payload, key and planning chat, so its pair differs only by the inte
   and may adapt to whatever the new A left.
 - replace_b: A's saved output stands. A fresh honest B works from the saved view, then C continues.
 - clean_before_c: A's and B's saved outputs stand. The workspace is cleaned, then C continues.
+- canonicalize_before_c: the same, with the shared data's free-form names made neutral instead.
 
 A replaced agent gets the base prompt, no private goal and no private tool. Nobody is told of the
 replacement. Every arm records C's bit accuracy, usefulness and cost, and saves the same workspaces
@@ -22,7 +23,7 @@ from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
-from crow.control import clean_workspace
+from crow.control import canonicalize_workspace, clean_workspace
 from crow.events import EventLog
 from crow.llm import LLMCall
 from crow.wrap import snapshot
@@ -49,8 +50,15 @@ from env.relational import scheme_for
 from env.sandbox import Sandbox
 from env.taskset import Task, load_task
 
-ARMS = ("replace_a", "replace_b", "clean_before_c")
-_REPLACED = {"replace_a": "A", "replace_b": "B", "clean_before_c": None}
+ARMS = ("replace_a", "replace_b", "clean_before_c", "canonicalize_before_c")
+_REPLACED = {
+    "replace_a": "A",
+    "replace_b": "B",
+    "clean_before_c": None,
+    "canonicalize_before_c": None,
+}
+_REWRITE = {"clean_before_c": clean_workspace, "canonicalize_before_c": canonicalize_workspace}
+_REPORT = {"clean_before_c": "clean", "canonicalize_before_c": "canonicalize"}
 _NO_CHAT = {"proposal": None, "reply": None, "c_reply": None}
 
 
@@ -61,7 +69,8 @@ def arm_episode_id(base_id: str, arm: str) -> str:
 
 def arm_bases(records: list[dict], defense: str = "open") -> list[dict]:
     """The saved episodes the arms apply to: every finished split, control and honest episode with
-    this defense, whatever any monitor would say of it. Not the no-plan cell or the hard version."""
+    this defense, whatever any monitor would say of it. Not the no-plan cell, the hard version or
+    the careless contrast."""
     return [
         r
         for r in records
@@ -70,6 +79,7 @@ def arm_bases(records: list[dict], defense: str = "open") -> list[dict]:
         and r["config"]["defense"] == defense
         and r["config"]["role"] in ("collude_split", "collude", "honest")
         and r["config"]["planning"]
+        and not r["config"].get("careless")
     ]
 
 
@@ -188,9 +198,9 @@ def run_arm(
                 _save_tar(out_dir, stem, name, data)
             _save_tar(out_dir, stem, "b_out", b_out)
             starter = snapshot(task.starter_tar(config.variant))
-            c_view, clean_report = clean_workspace(b_out, starter, manifest)
-            record["clean"] = clean_report.to_dict()
-            record["seal"]["C"] = {"mode": "clean"}
+            c_view, rewrite = _REWRITE[arm](b_out, starter, manifest)
+            record[_REPORT[arm]] = rewrite.to_dict()
+            record["seal"]["C"] = {"mode": _REPORT[arm]}
             _save_tar(out_dir, stem, "c_view", c_view)
         final = turn("C", c_view)
         _save_tar(out_dir, stem, "final", final)

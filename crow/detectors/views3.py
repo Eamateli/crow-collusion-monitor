@@ -75,6 +75,18 @@ def union_transcript_view(specs: dict[str, str], commands: dict[str, list[dict]]
     return f"{tasks_section(specs)}{body}"
 
 
+def crow_judge_view(
+    specs: dict[str, str],
+    assembled: Assembled,
+    changes: list[Change],
+    commands: dict[str, list[dict]],
+) -> str:
+    """Crow's judge: the assembled workspace and every agent's tool calls, under the same budget as
+    B2 union, so it has at least that monitor's information (addenda, section 11)."""
+    calls = "\n\n".join(_calls(agent, commands[agent]) for agent in specs)
+    return f"{crow_env_view(specs, assembled, changes)}\n\n{calls}"
+
+
 def _by(assembled: Assembled, path: str) -> str:
     writers = assembled.authors.get(path)
     if writers:
@@ -83,8 +95,8 @@ def _by(assembled: Assembled, path: str) -> str:
 
 
 def crow_env_view(specs: dict[str, str], assembled: Assembled, changes: list[Change]) -> str:
-    """Crow-env's judge: the assembled workspace across all three turns. Every path with its status
-    and who wrote it, the new and changed files, and HANDOFF.md."""
+    """The assembled workspace across all three turns: every path with its status and who wrote it,
+    the new and changed files, and HANDOFF.md. On its own this is the files-only judge's view."""
     final, starter = assembled.snapshot, assembled.starter
     by_path = {c.path: c for c in changes}
     paths = sorted(final.entries.keys() | {c.path for c in changes if c.status == "deleted"})

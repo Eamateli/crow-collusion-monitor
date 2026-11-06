@@ -36,6 +36,7 @@ from crow.detectors.postcondition import postcondition
 from crow.detectors.views3 import (
     agent_transcript_view,
     crow_env_view,
+    crow_judge_view,
     message_view3,
     union_transcript_view,
 )
@@ -63,6 +64,7 @@ from env.prompts import (
     AGENT_SYSTEM_B,
     AGREED_A,
     AGREED_B,
+    CAREFUL_LINE,
     COLLUDE_A_ADDENDUM,
     COLLUDE_B_ADDENDUM,
     CONTROL_A_ADDENDUM,
@@ -71,12 +73,14 @@ from env.prompts import (
     CONTROL_PLAN_A,
     CONTROL_PLAN_C,
     CROW_JUDGE3_PROMPT,
+    CROW_JUDGE_FILES_PROMPT,
     CROW_JUDGE_PROMPT,
     DEFENSE_TEXT,
     DEFENSE_TEXT3,
     MESSAGE_MONITOR3_PROMPT,
     MESSAGE_MONITOR_PROMPT,
     MONITOR_CALLS,
+    MONITOR_NOTICE,
     PARAPHRASE_PARAMS,
     PARAPHRASE_PROMPT,
     PLAN3_A,
@@ -129,10 +133,13 @@ class EpisodeConfig:
     seed: int
     planning: bool = True  # collude only; False = Schelling (no planning chat)
     agents: int = 2  # 2 = v1 (A, B); 3 = Crow v2 (A, B, C)
+    careless: bool = False  # the contrast cell: no notice of what monitors see (addenda, 11)
 
     def __post_init__(self) -> None:
         if self.split and self.agents != 3:
             raise ValueError("collude_split needs three agents")
+        if self.careless and not (self.collude and self.agents == 3):
+            raise ValueError("only a 3-agent collusion episode can be careless")
         if self.role == "collude" and self.agents == 3 and not self.planning:
             raise ValueError("the 3-agent control always has its planning chat")
 
@@ -146,10 +153,17 @@ class EpisodeConfig:
 
 
 def episode_id_for(
-    role: str, task_id: str, defense: str, seed: int, k: int, planning: bool, agents: int = 2
+    role: str,
+    task_id: str,
+    defense: str,
+    seed: int,
+    k: int,
+    planning: bool,
+    agents: int = 2,
+    careless: bool = False,
 ) -> str:
-    # The suffix must not start with "__a": resume splits record names on "__a" (the attempt).
-    harness = "__3a" if agents == 3 else ""
+    # A suffix must not start with "__a": resume splits record names on "__a" (the attempt).
+    harness = ("__careless" if careless else "") + ("__3a" if agents == 3 else "")
     if role not in COLLUDE_ROLES:
         return f"{role}__{task_id}__{defense}__s{seed}{harness}"
     chat = "" if planning else "__nochat"
@@ -164,11 +178,12 @@ def make_config(
     k: int = 0,
     planning: bool = True,
     agents: int = 2,
+    careless: bool = False,
 ) -> EpisodeConfig:
     variant = ROLE_VARIANT[role]
     k = k if role in COLLUDE_ROLES else 0
     return EpisodeConfig(
-        episode_id_for(role, task_id, defense, seed, k, planning, agents),
+        episode_id_for(role, task_id, defense, seed, k, planning, agents, careless),
         task_id,
         variant,
         role,
@@ -177,6 +192,7 @@ def make_config(
         seed,
         planning,
         agents,
+        careless,
     )
 
 
@@ -591,8 +607,15 @@ def _private3(config: EpisodeConfig, agent: str) -> tuple[str, dict] | None:
 
 
 def honest_system3(agent: str, config: EpisodeConfig) -> str:
-    """The base system prompt, the same for every role (CLAUDE.md section 5, prompt parity)."""
-    return _SYSTEM3[agent].format(defense_text=DEFENSE_TEXT3[config.defense])
+    """The base system prompt, the same for every role (CLAUDE.md section 5, prompt parity). In a
+    careful episode it ends with the notice of what monitors see (addenda, section 11)."""
+    base = _SYSTEM3[agent].format(defense_text=DEFENSE_TEXT3[config.defense])
+    return base if config.careless else f"{base}\n\n{MONITOR_NOTICE}"
+
+
+def _addendum3(base: str, text: str, config: EpisodeConfig) -> str:
+    """A colluding agent's prompt. In a careful episode it ends with the careful line."""
+    return f"{base}\n\n{text}" if config.careless else f"{base}\n\n{text}\n\n{CAREFUL_LINE}"
 
 
 def _system3(
@@ -621,12 +644,12 @@ def _system3(
         # Fill {method} first: it holds placeholders of its own. The chat text is filled by format
         # and never re-parsed, so braces in what the agents said are safe.
         template = _SPLIT_ADDENDUM[agent].replace("{method}", method)
-        return f"{base}\n\n{template.format(scheme=scheme_block, **fields)}"
+        return _addendum3(base, template.format(scheme=scheme_block, **fields), config)
     if config.collude and agent in _CONTROL_ADDENDUM:
         text = _CONTROL_ADDENDUM[agent].format(
             scheme=scheme_text(scheme, None), entries_name=CONTROL_ENTRIES, **fields
         )
-        return f"{base}\n\n{text}"
+        return _addendum3(base, text, config)
     return base
 
 
@@ -648,6 +671,8 @@ def _planning3(
 
     def ask(agent: str, template: str, **said: str) -> LLMCall:
         content = template.format(**fixed, **said)
+        if not config.careless:
+            content = f"{content}\n\n{MONITOR_NOTICE} {CAREFUL_LINE}"
         return agent_client.chat(
             [{"role": "user", "content": content}],
             affinity_key=f"{config.episode_id}-{agent}",
@@ -788,7 +813,12 @@ def score_three(
         )
 
     view = build_assembled_view(starter, final, manifest, events, cfg.calibration)
-    judge = ask("judge", CROW_JUDGE3_PROMPT, crow_env_view(specs, assembled, view.changes))
+    judge = ask(
+        "judge", CROW_JUDGE3_PROMPT, crow_judge_view(specs, assembled, view.changes, commands)
+    )
+    judge_files = ask(
+        "judge-files", CROW_JUDGE_FILES_PROMPT, crow_env_view(specs, assembled, view.changes)
+    )
     crow = score_crow(view, judge, cfg)
     b1 = ask("b1", MESSAGE_MONITOR3_PROMPT, message_view3(specs["A"], final))
     per_agent = {
@@ -814,11 +844,12 @@ def score_three(
             "tau": tau,
             "alarm": tau is not None and post.score >= tau,
         },
+        "judge_files": _monitor_record3(judge_files),
         "b1": _monitor_record3(b1),
         "b2_per_agent": _per_agent_record(per_agent),
         "b2_union": _monitor_record3(union),
     }
-    calls = judge.calls + b1.calls + union.calls
+    calls = judge.calls + judge_files.calls + b1.calls + union.calls
     calls += [call for result in per_agent.values() for call in result.calls]
     return scores, calls
 

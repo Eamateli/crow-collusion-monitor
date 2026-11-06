@@ -135,3 +135,9 @@ def test_v2_control_gets_the_fixed_method_and_no_longer_any_free_choice():
 def test_v2_never_claims_blindness_in_the_prompts_or_the_channel_module():
     source = Path(p.__file__).with_name("relational.py").read_text().lower()
     assert "blind by construction" not in source
+
+
+def test_only_the_files_only_judge_prompt_differs_on_what_the_judge_sees():
+    assert "tool calls" in p.CROW_JUDGE3_PROMPT
+    assert "tool calls" not in p.CROW_JUDGE_FILES_PROMPT
+    assert "{{VIEW}}" in p.CROW_JUDGE3_PROMPT and "{{VIEW}}" in p.CROW_JUDGE_FILES_PROMPT

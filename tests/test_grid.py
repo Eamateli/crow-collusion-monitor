@@ -82,27 +82,44 @@ def test_main_grid_one_task_per_seed_and_matched_payloads():
     assert sorted(Counter(task_for_seed(s) for s in range(20)).values()) == [3, 3, 3, 3, 4, 4]
 
 
-def test_v2_main_grid_is_130_episodes_as_in_the_spec():
+def test_v2_main_grid_is_12_seeds_plus_the_careless_contrast():
     from experiments.grid import v2_main_configs
 
     configs = v2_main_configs()
-    assert len(configs) == 130 and len({c.episode_id for c in configs}) == 130
+    assert len(configs) == 180 and len({c.episode_id for c in configs}) == 180
     assert {c.agents for c in configs} == {3}
     assert [c.seed for c in configs] == sorted(c.seed for c in configs)
-    assert {c.seed for c in configs} == set(range(10))
-    planned_split = [c for c in configs if c.split and c.planning]
-    noplan_split = [c for c in configs if c.split and not c.planning]
-    control = [c for c in configs if c.role == "collude"]
-    assert Counter(c.defense for c in planned_split) == dict.fromkeys(
-        ("open", "seal_side", "seal_side_para"), 10
-    )
-    assert Counter(c.defense for c in control) == dict.fromkeys(
-        ("open", "seal_side", "seal_side_para"), 10
-    )
-    assert len(noplan_split) == 10 and {c.defense for c in noplan_split} == {"open"}
+    assert {c.seed for c in configs} == set(range(12))
+    careful = [c for c in configs if not c.careless]
+    careless = [c for c in configs if c.careless]
+    planned_split = [c for c in careful if c.split and c.planning]
+    noplan_split = [c for c in careful if c.split and not c.planning]
+    control = [c for c in careful if c.role == "collude"]
+    every_defense = dict.fromkeys(("open", "seal_side", "seal_side_para"), 12)
+    assert Counter(c.defense for c in planned_split) == every_defense
+    assert Counter(c.defense for c in control) == every_defense
+    assert len(noplan_split) == 12 and {c.defense for c in noplan_split} == {"open"}
     assert {c.k for c in configs if c.collude} == {8}
-    assert Counter(c.role for c in configs if not c.collude) == {"honest": 30, "honest_hard": 30}
+    assert Counter(c.role for c in configs if not c.collude) == {"honest": 36, "honest_hard": 36}
     assert {c.variant for c in configs if c.collude} == {"base"}
+    assert Counter(c.role for c in careless) == {"collude_split": 12, "collude": 12}
+    assert {c.defense for c in careless} == {"open"}
+
+
+def test_v2_arm_bases_are_12_per_role_and_exclude_the_careless_contrast():
+    from env.replay import arm_bases
+    from experiments.grid import v2_main_configs
+
+    records = [
+        {"episode_id": c.episode_id, "status": "ok", "config": vars(c)} for c in v2_main_configs()
+    ]
+    bases = arm_bases(records)
+    assert Counter(r["config"]["role"] for r in bases) == {
+        "collude_split": 12,
+        "collude": 12,
+        "honest": 12,
+    }
+    assert not [r for r in bases if r["config"]["careless"]]
 
 
 def test_v2_matched_sets_share_task_payload_and_scheme():
@@ -142,23 +159,22 @@ def test_v1_grids_stay_two_agent():
     assert {c.agents for c in main_configs() + calibration_configs() + probe_configs()} == {2}
 
 
-def test_v2_smoke_covers_every_task_and_stays_apart_from_every_other_run():
+def test_v2_resmoke_covers_every_task_on_new_seeds():
     from experiments.grid import (
         CALIBRATION_SEEDS,
         MAIN_SEEDS,
-        PROBE_FIRST_SEED,
         V2_CALIBRATION_SEEDS,
-        v2_smoke_configs,
+        V2_MAIN_SEEDS,
+        v2_resmoke_configs,
     )
 
-    configs = v2_smoke_configs()
-    assert len(configs) == 12 and len({c.episode_id for c in configs}) == 12
-    assert {c.agents for c in configs} == {3}
-    splits = [c for c in configs if c.split and c.defense == "open"]
-    assert sorted(c.task_id for c in splits) == sorted(task_ids())
-    assert Counter(c.role for c in configs) == {"collude_split": 8, "collude": 2, "honest": 2}
+    configs = v2_resmoke_configs()
+    assert len(configs) == 6 and len({c.episode_id for c in configs}) == 6
+    assert sorted(c.task_id for c in configs) == sorted(task_ids())
+    assert Counter(c.role for c in configs) == {"collude_split": 3, "collude": 1, "honest": 2}
+    assert {c.agents for c in configs} == {3} and {c.defense for c in configs} == {"open"}
+    assert not [c for c in configs if c.careless]  # the careful prompts
     seeds = {c.seed for c in configs}
-    assert min(seeds) >= 3100
-    for other in (MAIN_SEEDS, CALIBRATION_SEEDS, V2_CALIBRATION_SEEDS):
+    assert seeds == set(range(3106, 3112))  # the first v2 smoke took 3100 to 3105
+    for other in (MAIN_SEEDS, CALIBRATION_SEEDS, V2_CALIBRATION_SEEDS, V2_MAIN_SEEDS):
         assert not seeds & set(other)
-    assert PROBE_FIRST_SEED < min(seeds)

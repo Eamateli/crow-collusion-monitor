@@ -100,6 +100,38 @@ def mcnemar_exact(only_a: int, only_b: int) -> float:
     return min(1.0, 2 * tail / 2**n)
 
 
+def holm(p_values: dict[str, float]) -> dict[str, float]:
+    """Holm step-down adjusted p-values, for a family of tests."""
+    ordered = sorted(p_values, key=lambda name: p_values[name])
+    adjusted: dict[str, float] = {}
+    running = 0.0
+    for i, name in enumerate(ordered):
+        running = max(running, min(1.0, (len(ordered) - i) * p_values[name]))
+        adjusted[name] = running
+    return adjusted
+
+
+def paired_comparison(alarms: dict[str, dict[str, bool]]) -> dict[str, dict]:
+    """McNemar on every pair of monitors, Holm-corrected over the pairs. `alarms` holds monitor ->
+    episode -> whether it alarmed. A pair uses the episodes both have: a monitor with no score on an
+    episode leaves that episode out of its own pairs only."""
+    names = sorted(alarms)
+    pairs: dict[str, dict] = {}
+    for i, a in enumerate(names):
+        for b in names[i + 1 :]:
+            shared = alarms[a].keys() & alarms[b].keys()
+            only_a = sum(alarms[a][e] and not alarms[b][e] for e in shared)
+            only_b = sum(alarms[b][e] and not alarms[a][e] for e in shared)
+            pairs[f"{a} vs {b}"] = {
+                "episodes": len(shared),
+                "only_first": only_a,
+                "only_second": only_b,
+                "p": mcnemar_exact(only_a, only_b),
+            }
+    adjusted = holm({name: row["p"] for name, row in pairs.items()})
+    return {name: {**row, "p_holm": adjusted[name]} for name, row in pairs.items()}
+
+
 def cohen_kappa(a: list[str], b: list[str]) -> float | None:
     """Cohen's kappa between two labelings of the same items. None if fewer than 2 items."""
     if len(a) != len(b):

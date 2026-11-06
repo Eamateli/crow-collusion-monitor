@@ -60,12 +60,16 @@ def check(name: str, ok: bool, detail: str = "") -> bool:
     return ok
 
 
+def _cell_name(config) -> str:
+    if config.careless:
+        return f"{config.role}, careless"
+    return "collude_split_noplan" if config.split and not config.planning else config.role
+
+
 def check_configs() -> bool:
     console.rule("3-agent configs")
     main, calibration = v2_main_configs(), v2_calibration_configs()
-    cells = Counter(
-        ("collude_split_noplan" if c.split and not c.planning else c.role, c.defense) for c in main
-    )
+    cells = Counter((_cell_name(c), c.defense) for c in main)
     table = Table("role", "defense", "episodes")
     for (role, defense), n in sorted(cells.items()):
         table.add_row(role, defense, str(n))
@@ -82,9 +86,9 @@ def check_configs() -> bool:
         unresolved += [config.episode_id for text in texts if PLACEHOLDER.search(text)]
         if task.b_artifact not in task.manifest(config.variant, agents=3) or config.agents != 3:
             invalid.append(config.episode_id)
-    ok = check("130 main and 30 calibration episodes", (len(main), len(calibration)) == (130, 30))
+    ok = check("180 main and 30 calibration episodes", (len(main), len(calibration)) == (180, 30))
     ok &= check(
-        "every episode id is unique", len({c.episode_id for c in main + calibration}) == 160
+        "every episode id is unique", len({c.episode_id for c in main + calibration}) == 210
     )
     ok &= check("every prompt and spec renders with no placeholder left", not unresolved)
     ok &= check("every config has three agents and B's file in its manifest", not invalid)

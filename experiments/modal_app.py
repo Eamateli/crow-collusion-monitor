@@ -27,7 +27,7 @@ from experiments.grid import (
     probe_configs,
     v2_calibration_configs,
     v2_main_configs,
-    v2_smoke_configs,
+    v2_resmoke_configs,
 )
 from experiments.score_v2 import DONE_MARKER, follow_run, run_finished, score_run
 from experiments.score_v2 import MAX_TOTAL_TOKENS as MAX_SCORING_TOKENS
@@ -38,12 +38,13 @@ VOLUME_NAME = "crow-results"
 RESULTS = "/results"
 MAX_TOTAL_TOKENS = 8_000_000  # budget guard; override with --max-tokens
 V2_GRIDS = {
-    "v2_smoke": v2_smoke_configs,
+    "v2_resmoke": v2_resmoke_configs,
     "v2_calibration": v2_calibration_configs,
     "v2_main": v2_main_configs,
 }
 V2_ARMS_RUN = "v2_intervention"
-RUNS = ("smoke", "probe", "calibration", "main", *V2_GRIDS, V2_ARMS_RUN)  # /results/<run>/ each
+# v2_smoke is the first v2 smoke's folder: it can be a base for arms, but is never run again.
+RUNS = ("smoke", "probe", "calibration", "main", "v2_smoke", *V2_GRIDS, V2_ARMS_RUN)
 # Modal allows up to 24 hours per attempt. A pass that dies resumes when launched again.
 SCORING_TIMEOUT = 12 * 3600
 SMOKE_SEED = 3000  # smoke seeds are 3000 and up (CLAUDE.md section 5, Results namespaces)
@@ -324,8 +325,8 @@ def main(
     base_run: str = "",
     arms: str = ",".join(ARMS),
 ) -> None:
-    """--smoke, or --run probe [--probe-first-seed N] | calibration | main | v2_smoke |
-    v2_calibration | v2_main, or --run v2_intervention --base-run v2_smoke [--arms a,b]. --only
+    """--smoke, or --run probe [--probe-first-seed N] | calibration | main | v2_resmoke |
+    v2_calibration | v2_main, or --run v2_intervention --base-run v2_main [--arms a,b]. --only
     keeps the configs whose episode_id contains that text. Launch long runs with
     `modal run --detach` (CLAUDE.md section 9)."""
     run = "smoke" if smoke else run

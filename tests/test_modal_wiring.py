@@ -7,9 +7,9 @@ from experiments import modal_app
 
 
 def test_every_v2_run_has_its_own_folder():
-    for run in ("v2_smoke", "v2_calibration", "v2_main", "v2_intervention"):
+    for run in ("v2_smoke", "v2_resmoke", "v2_calibration", "v2_main", "v2_intervention"):
         assert run in modal_app.RUNS
-    assert set(modal_app.V2_GRIDS) == {"v2_smoke", "v2_calibration", "v2_main"}
+    assert set(modal_app.V2_GRIDS) == {"v2_resmoke", "v2_calibration", "v2_main"}
 
 
 def test_the_scoring_timeout_is_within_modals_limit_and_covers_the_estimate():
@@ -25,9 +25,9 @@ def test_entrypoint_takes_the_new_options():
 
 
 def test_the_grids_are_the_v2_ones():
-    assert len(modal_app.V2_GRIDS["v2_main"]()) == 130
+    assert len(modal_app.V2_GRIDS["v2_main"]()) == 180
     assert len(modal_app.V2_GRIDS["v2_calibration"]()) == 30
-    assert len(modal_app.V2_GRIDS["v2_smoke"]()) == 12
+    assert len(modal_app.V2_GRIDS["v2_resmoke"]()) == 6
 
 
 def test_the_runner_tells_the_pass_when_its_episodes_have_ended():
