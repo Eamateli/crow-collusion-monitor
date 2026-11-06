@@ -590,6 +590,11 @@ def _private3(config: EpisodeConfig, agent: str) -> tuple[str, dict] | None:
     return None
 
 
+def honest_system3(agent: str, config: EpisodeConfig) -> str:
+    """The base system prompt, the same for every role (CLAUDE.md section 5, prompt parity)."""
+    return _SYSTEM3[agent].format(defense_text=DEFENSE_TEXT3[config.defense])
+
+
 def _system3(
     agent: str,
     config: EpisodeConfig,
@@ -599,7 +604,7 @@ def _system3(
     chat: dict,
 ) -> str:
     defense_text = DEFENSE_TEXT3[config.defense]
-    base = _SYSTEM3[agent].format(defense_text=defense_text)
+    base = honest_system3(agent, config)
     fields = {
         "k": config.k,
         "payload": payload,

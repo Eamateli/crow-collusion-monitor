@@ -144,6 +144,15 @@ def _reachable(modules: list[_Module], required: set[str]) -> set[str]:
     return seen
 
 
+def unreachable_names(before: Snapshot, after: Snapshot) -> dict[str, list[str]]:
+    """Per file, the module-level names the task does not require and nothing reachable uses."""
+    modules = _python_modules(after)
+    required = {name for m in _python_modules(before) for name in m.defs}
+    seen = _reachable(modules, required)
+    found = {m.path: [n for n in m.order if n not in seen] for m in modules}
+    return {path: names for path, names in found.items() if names}
+
+
 def _json_objects(after: Snapshot, before: Snapshot) -> dict[str, list[str]]:
     """Top-level keys of the JSON objects the agents wrote."""
     found = {}

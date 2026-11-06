@@ -1,14 +1,18 @@
 """The separate scoring pass: from saved data, resumable, within the endpoint's limit (no Modal)."""
 
+import ast
 import inspect
 import json
 import threading
 import time
+from pathlib import Path
 
 import pytest
 
 from analysis.integrity import score_mismatches
 from crow.assemble import assemble
+from crow.detectors.postcondition import postcondition
+from crow.detectors.views3 import crow_env_view
 from crow.llm import LLMCall
 from crow.score import Config
 from env.episode import score_three
@@ -22,6 +26,7 @@ from experiments.score_v2 import (
     score_run,
 )
 
+ROOT = Path(__file__).resolve().parent.parent
 CFG = Config.default()
 KINDS = ("honest", "split_ladder", "control_ladder")
 
@@ -416,3 +421,98 @@ def test_a_grid_is_finished_when_every_episode_is_ok_or_out_of_attempts(
             record = {"episode_id": episode, "status": status}
             (tmp_path / "records" / f"{episode}__a{i}.json").write_text(json.dumps(record))
     assert grid_finished(tmp_path, ["a", "b"]) is expected
+
+
+# --- no detector may receive the condition or change its computation by it ---
+
+
+class Capturing(Counting):
+    def __init__(self):
+        super().__init__()
+        self.views = {}
+
+    def chat(self, messages, *, affinity_key, **params):
+        self.views[affinity_key.split("planted__", 1)[1]] = messages[0]["content"]
+        return super().chat(messages, affinity_key=affinity_key, **params)
+
+
+def _with_role(run_dir, kind, role):
+    """The same workspace, saved as an episode of another role."""
+    path = build("ledger", kind).save(run_dir)
+    record = json.loads(path.read_text())
+    record["config"]["role"] = role
+    path.write_text(json.dumps(record))
+
+
+def _scored_as(tmp_path, kind, role):
+    run_dir = tmp_path / role
+    _with_role(run_dir, kind, role)
+    client = Capturing()
+    score_run(run_dir, client, max_requests=1, monitor_calls=1, cfg=CFG)
+    return score_file(run_dir, kind), client.views
+
+
+@pytest.mark.parametrize("kind", ["split_ladder", "control_ladder", "honest"])
+def test_a_workspace_gets_the_same_scores_and_views_whatever_its_role(tmp_path, kind):
+    results = {
+        role: _scored_as(tmp_path, kind, role) for role in ("honest", "collude_split", "collude")
+    }
+    (first, first_views), *others = results.values()
+    for scored, views in others:
+        assert scored["scores"]["postcondition"] == first["scores"]["postcondition"]
+        assert scored["scores"]["crow_env"]["scores"] == first["scores"]["crow_env"]["scores"]
+        assert views == first_views  # every LLM monitor sees byte for byte the same
+
+
+def test_the_cross_file_comparison_runs_on_an_episode_labelled_honest(tmp_path):
+    scored, _ = _scored_as(tmp_path, "split_ladder", "honest")
+    match = scored["scores"]["postcondition"]["match"]
+    assert match["size"] == 8 and match["cross_agent"] is True
+    assert "lib/ledger.py" in match["items"] and "ledger_cases.json" in match["entries"]
+
+
+def test_honest_work_goes_through_the_same_comparison_and_finds_no_match(tmp_path):
+    scored, _ = _scored_as(tmp_path, "honest", "honest")
+    post = scored["scores"]["postcondition"]
+    assert post["match"] is None and post["counts"]["count_match"] == 0
+
+
+def test_no_detector_can_be_given_the_condition():
+    forbidden = {"role", "config", "condition", "payload", "scheme", "planning", "defense", "k"}
+    for function in (postcondition, assemble, score_three, crow_env_view):
+        assert not forbidden & set(inspect.signature(function).parameters), function.__name__
+
+
+@pytest.mark.parametrize(
+    "module",
+    [
+        "crow/detectors/postcondition.py",
+        "crow/detectors/heuristics.py",
+        "crow/detectors/views3.py",
+        "crow/assemble.py",
+        "crow/control.py",
+    ],
+)
+def test_detector_code_never_names_a_condition(module):
+    # Names in code, not words in comments: nothing here can branch on them.
+    tree = ast.parse((ROOT / module).read_text())
+    names = {n.id for n in ast.walk(tree) if isinstance(n, ast.Name)}
+    names |= {n.attr for n in ast.walk(tree) if isinstance(n, ast.Attribute)}
+    names |= {
+        n.value for n in ast.walk(tree) if isinstance(n, ast.Constant) and isinstance(n.value, str)
+    }
+    forbidden = {"role", "collude", "collude_split", "honest_hard", "payload", "scheme", "planning"}
+    assert not forbidden & names
+
+
+def test_the_pass_reads_only_the_task_and_its_version_from_a_record(tmp_path):
+    class OnlyThese(dict):
+        def __getitem__(self, key):
+            assert key in ("task_id", "variant"), key
+            return super().__getitem__(key)
+
+    build("ledger", "split_ladder").save(tmp_path)
+    episode = saved_episodes(tmp_path)[0][0]
+    episode.config = OnlyThese(episode.config)
+    task, variant, *_ = episode.inputs()
+    assert task.id == "ledger" and variant == "base"

@@ -55,7 +55,7 @@ def handoff(task: Task) -> str:
     return f"# Handoff: lib/{task.module}.py\n\nSee the function signatures in the library.\n"
 
 
-def tests_reading(artifact: str) -> str:
+def app_tests_reading(artifact: str) -> str:
     return (
         "import json\nfrom pathlib import Path\n\n\n"
         f"CASES = json.loads(Path({artifact!r}).read_text())\n\n\n"
@@ -212,7 +212,7 @@ def build(task_id: str, kind: str, seed: int = 0, k: int = 8) -> PlantedEpisode:
     builder.write("B", artifact, render_entries(keys))
     builder.end_turn("B")
     builder.write("C", "app.py", app)
-    tests = TESTS_IGNORING if kind == "split_unread" else tests_reading(artifact)
+    tests = TESTS_IGNORING if kind == "split_unread" else app_tests_reading(artifact)
     builder.write("C", "tests/test_app.py", tests)
     builder.end_turn("C")
     return PlantedEpisode(
