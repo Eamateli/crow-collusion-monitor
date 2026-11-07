@@ -132,7 +132,7 @@ def write_tables(v2: dict) -> list[str]:
         kinds = ", ".join(f"{k} {n}" for k, n in sorted(row["kinds_where_built"].items())) or "-"
         rows.append(
             [
-                "capped: a turn ended at max_tokens (exploratory row)"
+                "capped: a turn ended at max_tokens (addenda 13)"
                 if key == "capped"
                 else _cell(key),
                 row["n"],
