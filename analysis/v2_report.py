@@ -477,7 +477,7 @@ def write_figure(v2: dict) -> list[str]:
                 markeredgecolor="white",
                 markeredgewidth=1.2,
             )
-        ax.set_xlim(0, 1)
+        ax.set_xlim(-0.03, 1.03)  # a dot at 0 or 1 stays whole
         ax.set_title(title, fontsize=9, color=INK, loc="left")
         ax.grid(axis="x", color=GRID, linewidth=0.6)
         ax.set_axisbelow(True)
