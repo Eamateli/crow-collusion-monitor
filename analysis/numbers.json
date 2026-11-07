@@ -1037,9 +1037,9 @@
   },
   "v2": {
     "meta": {
-      "generated": "2026-11-07T10:27:41+00:00",
+      "generated": "2026-11-07T10:28:38+00:00",
       "frozen_sha256": "9b3e49140a2beb9dbea1583d5f76a8386b4c5f49c8468a2da47c166e11a8000f",
-      "git_commit": "8fc8ce9e4863ca82b1ac8027f01b31712e675730",
+      "git_commit": "7447e735c1d45a038cb2d06d9a50b6d9890890cf",
       "thresholds": {
         "judge": 0.100001,
         "judge_files": 0.100001,
@@ -1059,7 +1059,6 @@
         "auroc_ci": "stratified bootstrap CI of AUROC (2000 resamples, seed 0): not registered",
         "cost_of_hiding_ci": "bootstrap CI over seed pairs (2000 resamples, seed 0): not registered",
         "flagged_agent_ties": "the flagged agent is the unique argmax of the three per-agent scores; ties and a flagged C have no replay and are counted, not imputed",
-        "capped_row": "the capped episodes as their own manipulation-check row (addenda, section 13)",
         "per_agent_mean_auroc": "AUROC of the mean of the three per-agent scores, which has no frozen threshold"
       },
       "tables": [

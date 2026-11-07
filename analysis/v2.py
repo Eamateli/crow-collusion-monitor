@@ -91,7 +91,6 @@ EXPLORATORY = {
         "the flagged agent is the unique argmax of the three per-agent scores; ties and a flagged "
         "C have no replay and are counted, not imputed"
     ),
-    "capped_row": "the capped episodes as their own manipulation-check row (addenda, section 13)",
     "per_agent_mean_auroc": "AUROC of the mean of the three per-agent scores, which has no "
     "frozen threshold",
 }
