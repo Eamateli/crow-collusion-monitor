@@ -46,6 +46,7 @@ from analysis.metrics import (
 ROOT = Path(__file__).resolve().parent.parent
 FROZEN_V2 = ROOT / "crow" / "frozen_v2.json"
 PREEMPTIONS = ROOT / "results" / "v2_main" / "preemptions.json"
+BILLING = ROOT / "results" / "v2_main" / "billing.json"
 DEFENSES = ("open", "seal_side", "seal_side_para")
 RESAMPLES, SEED = 2000, 0  # CLAUDE.md section 7, equation 5
 RESCORE_FIX_COMMIT = "b011a91"  # the logged fix after which 52 lost results were scored again
@@ -93,6 +94,11 @@ EXPLORATORY = {
     ),
     "per_agent_mean_auroc": "AUROC of the mean of the three per-agent scores, which has no "
     "frozen threshold",
+    "false_alarms_by_defense": "each monitor's false alarms on the main honest episodes, by role "
+    "and defense; calibration ran under open only (added after S7, at the user's request)",
+    "flagged_agents": "which agent the per-agent monitor flags (the unique highest of the three "
+    "per-agent scores) in the careful split and control cells, ties and C counted (added after "
+    "S7, at the user's request)",
 }
 
 
@@ -687,6 +693,88 @@ def hiding(records: list[dict]) -> dict[str, Any]:
 # --- integrity (addenda, section 13) ---
 
 
+def false_alarms_by_defense(data: V2Data, monitors: Monitors) -> dict[str, Any]:
+    """Each monitor's false alarms on the main honest episodes by role and defense (exploratory)."""
+    groups: dict[str, list[str]] = defaultdict(list)
+    for r in data.records:
+        if r["config"]["role"] in ("honest", "honest_hard"):
+            groups[f"{r['config']['role']}|{r['config']['defense']}"].append(r["episode_id"])
+            groups[f"all|{r['config']['defense']}"].append(r["episode_id"])
+    keys = [f"{role}|{d}" for role in ("honest", "honest_hard", "all") for d in DEFENSES]
+    return {
+        m: {
+            key: rate(a for e in groups.get(key, []) if (a := monitors.alarm(e, m)) is not None)
+            for key in keys
+        }
+        for m in MONITORS
+    }
+
+
+def flagged_agents(records: list[dict], monitors: Monitors) -> dict[str, Any]:
+    """In the careful split and control cells, which agent the per-agent monitor flags: the unique
+    highest of its three scores, where it alarms; and the highest anywhere, alarm or not, as
+    context. Ties and C are counted, not resolved (exploratory)."""
+    out: dict[str, Any] = {}
+    for family in ("split", "control"):
+        rows: dict[str, Any] = {}
+        for defense in (*DEFENSES, "all"):
+            group = [
+                r
+                for r in records
+                if cell_of(r["config"])[0] == family
+                and (defense == "all" or r["config"]["defense"] == defense)
+            ]
+            alarmed, top = Counter(), Counter()
+            for r in group:
+                agent = _flagged_agent(monitors, r["episode_id"]) or "tie"
+                top[agent] += 1
+                if monitors.alarm(r["episode_id"], "per_agent"):
+                    alarmed[agent] += 1
+            rows[defense] = {
+                "episodes": len(group),
+                "alarmed": sum(alarmed.values()),
+                "flagged_where_it_alarms": {a: alarmed.get(a, 0) for a in ("A", "B", "C", "tie")},
+                "highest_score_any_episode": {a: top.get(a, 0) for a in ("A", "B", "C", "tie")},
+            }
+        out[family] = rows
+    out["payload_holder"] = {"split": "B", "control": "A"}
+    return out
+
+
+def spend() -> dict[str, Any] | None:
+    """What Modal billed for v2, from the committed report in results/v2_main/billing.json."""
+    if not BILLING.exists():
+        return None
+    facts = json.loads(BILLING.read_text(encoding="utf-8"))
+    items: dict[str, float] = defaultdict(float)
+    for row in facts["rows"]:
+        items[row["item"]] += row["usd"]
+    hours = [row["hour_utc"] for row in facts["rows"]]
+    return {
+        "total_usd": round(sum(items.values()), 4),
+        "by_item_usd": {k: round(v, 4) for k, v in sorted(items.items())},
+        "first_hour_utc": min(hours) if hours else None,
+        "last_hour_utc": max(hours) if hours else None,
+        "includes": "every v2 run: smoke, pilot, re-smoke, calibration, main grid, replays and "
+        "scoring; the agent and trusted endpoints are billed as ep-crow-agent and ep-crow-trusted",
+        "source": facts["source"],
+    }
+
+
+def versions(frozen: dict) -> dict[str, Any]:
+    """Model IDs, sampling settings and the frozen config's hash, for the appendix."""
+    return {
+        "frozen_v2_sha256": hashlib.sha256(FROZEN_V2.read_bytes()).hexdigest(),
+        "models": frozen["models"],
+        "agent_params": frozen["agent_params"],
+        "trusted_params": frozen["trusted_params"],
+        "paraphrase_params": frozen["paraphrase_params"],
+        "thinking": frozen["thinking"],
+        "monitor_calls_per_score": frozen["provenance"]["monitor_calls_per_score"],
+        "judge_prompt_sha256": frozen["judge_prompt_sha256"],
+    }
+
+
 def integrity(data: V2Data, monitors: Monitors) -> dict[str, Any]:
     from env.replay import arm_bases
     from experiments.grid import v2_main_configs
@@ -795,6 +883,10 @@ def numbers(data: V2Data, frozen: dict, helpers: dict, leaks: dict, git: str | N
         "leak_rate": leaks,
         "cost_of_hiding": hiding(data.records),
         "integrity": integrity(data, monitors),
+        "false_alarms_by_defense": false_alarms_by_defense(data, monitors),
+        "flagged_agents": flagged_agents(data.records, monitors),
+        "spend": spend(),
+        "versions": versions(frozen),
     }
 
 

@@ -1,0 +1,170 @@
+{
+ "source": "`modal billing report --start 2026-11-06 --resolution h --json`, read 2026-11-07T10:47Z; full hours only. No spend was billed from 2026-10-26 (v1's end) to 2026-11-06 (v2's first run).",
+ "rows": [
+  {
+   "hour_utc": "2026-11-06T17:00:00",
+   "item": "ep-crow-trusted",
+   "usd": 0.15918423
+  },
+  {
+   "hour_utc": "2026-11-06T18:00:00",
+   "item": "ep-crow-trusted",
+   "usd": 0.11172365
+  },
+  {
+   "hour_utc": "2026-11-06T19:00:00",
+   "item": "ep-crow-trusted",
+   "usd": 0.22202356
+  },
+  {
+   "hour_utc": "2026-11-06T20:00:00",
+   "item": "crow",
+   "usd": 0.01834426
+  },
+  {
+   "hour_utc": "2026-11-06T20:00:00",
+   "item": "ep-crow-agent",
+   "usd": 0.7243182
+  },
+  {
+   "hour_utc": "2026-11-06T20:00:00",
+   "item": "ep-crow-trusted",
+   "usd": 0.45008352
+  },
+  {
+   "hour_utc": "2026-11-06T21:00:00",
+   "item": "crow",
+   "usd": 0.00927053
+  },
+  {
+   "hour_utc": "2026-11-06T21:00:00",
+   "item": "crow",
+   "usd": 0.00086737
+  },
+  {
+   "hour_utc": "2026-11-06T21:00:00",
+   "item": "ep-crow-agent",
+   "usd": 0.26595612
+  },
+  {
+   "hour_utc": "2026-11-06T21:00:00",
+   "item": "ep-crow-trusted",
+   "usd": 0.15802889
+  },
+  {
+   "hour_utc": "2026-11-06T23:00:00",
+   "item": "crow",
+   "usd": 0.01714101
+  },
+  {
+   "hour_utc": "2026-11-06T23:00:00",
+   "item": "ep-crow-agent",
+   "usd": 0.36837972
+  },
+  {
+   "hour_utc": "2026-11-06T23:00:00",
+   "item": "ep-crow-trusted",
+   "usd": 0.32569342
+  },
+  {
+   "hour_utc": "2026-11-07T00:00:00",
+   "item": "crow",
+   "usd": 0.00140802
+  },
+  {
+   "hour_utc": "2026-11-07T00:00:00",
+   "item": "crow",
+   "usd": 0.0355911
+  },
+  {
+   "hour_utc": "2026-11-07T00:00:00",
+   "item": "ep-crow-agent",
+   "usd": 1.17077154
+  },
+  {
+   "hour_utc": "2026-11-07T00:00:00",
+   "item": "ep-crow-trusted",
+   "usd": 0.45067513
+  },
+  {
+   "hour_utc": "2026-11-07T01:00:00",
+   "item": "crow",
+   "usd": 0.01424588
+  },
+  {
+   "hour_utc": "2026-11-07T01:00:00",
+   "item": "ep-crow-trusted",
+   "usd": 1.80783805
+  },
+  {
+   "hour_utc": "2026-11-07T02:00:00",
+   "item": "crow",
+   "usd": 0.01548708
+  },
+  {
+   "hour_utc": "2026-11-07T02:00:00",
+   "item": "ep-crow-trusted",
+   "usd": 0.64043695
+  },
+  {
+   "hour_utc": "2026-11-07T03:00:00",
+   "item": "crow",
+   "usd": 0.14107149
+  },
+  {
+   "hour_utc": "2026-11-07T03:00:00",
+   "item": "ep-crow-agent",
+   "usd": 5.23895964
+  },
+  {
+   "hour_utc": "2026-11-07T03:00:00",
+   "item": "ep-crow-trusted",
+   "usd": 1.62376968
+  },
+  {
+   "hour_utc": "2026-11-07T04:00:00",
+   "item": "crow",
+   "usd": 0.22210263
+  },
+  {
+   "hour_utc": "2026-11-07T04:00:00",
+   "item": "ep-crow-agent",
+   "usd": 7.99157604
+  },
+  {
+   "hour_utc": "2026-11-07T04:00:00",
+   "item": "ep-crow-trusted",
+   "usd": 3.75055402
+  },
+  {
+   "hour_utc": "2026-11-07T05:00:00",
+   "item": "crow",
+   "usd": 0.03452281
+  },
+  {
+   "hour_utc": "2026-11-07T05:00:00",
+   "item": "ep-crow-trusted",
+   "usd": 3.04895186
+  },
+  {
+   "hour_utc": "2026-11-07T06:00:00",
+   "item": "crow",
+   "usd": 0.0215379
+  },
+  {
+   "hour_utc": "2026-11-07T06:00:00",
+   "item": "ep-crow-trusted",
+   "usd": 3.32221775
+  },
+  {
+   "hour_utc": "2026-11-07T07:00:00",
+   "item": "crow",
+   "usd": 0.00305591
+  },
+  {
+   "hour_utc": "2026-11-07T07:00:00",
+   "item": "ep-crow-trusted",
+   "usd": 0.07292157
+  }
+ ]
+}

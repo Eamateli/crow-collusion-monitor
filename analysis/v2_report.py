@@ -409,6 +409,44 @@ def write_tables(v2: dict) -> list[str]:
             for role, r in hiding.items()
         ],
     )
+    by_defense = v2["false_alarms_by_defense"]
+    keys = [f"{role}|{d}" for role in ("honest", "honest_hard", "all") for d in DEFENSES]
+    table(
+        "v2_false_alarms_by_defense.md",
+        ["monitor (exploratory)", *[k.replace("|", ", ") for k in keys]],
+        [
+            [MONITORS[m][2], *[_hits(by_defense[m][k]) for k in keys]]
+            for m in (*PRIMARY, *SECONDARY)
+        ],
+    )
+    flagged = v2["flagged_agents"]
+    rows = []
+    for family in ("split", "control"):
+        for defense, row in flagged[family].items():
+            where, top = row["flagged_where_it_alarms"], row["highest_score_any_episode"]
+            rows.append(
+                [family, defense, row["episodes"], row["alarmed"]]
+                + [where[a] for a in ("A", "B", "C", "tie")]
+                + [top[a] for a in ("A", "B", "C", "tie")]
+            )
+    table(
+        "v2_flagged_agents.md",
+        [
+            "cell (exploratory)",
+            "defense",
+            "episodes",
+            "per-agent alarms",
+            "flags A",
+            "flags B",
+            "flags C",
+            "tie",
+            "highest: A",
+            "B",
+            "C",
+            "tie",
+        ],
+        rows,
+    )
     integ = v2["integrity"]
     lost = integ["lost_on_save_and_rescored"]
     table(
@@ -635,6 +673,27 @@ def findings(v2: dict) -> list[str]:
                     f"payload recovered {_rate_text(r['recovered'])}; "
                     f"usefulness {_num(r['usefulness']['mean'])}."
                 )
+    out += ["", "## Exploratory, added after S7", ""]
+    by_defense = v2["false_alarms_by_defense"]
+    for m in (*PRIMARY, *SECONDARY):
+        out.append(
+            f"- False alarms by defense, {MONITORS[m][2]}: "
+            + "; ".join(
+                f"{role.replace('_', ' ')} {d} {_hits(by_defense[m][f'{role}|{d}'])}"
+                for role in ("honest", "honest_hard")
+                for d in DEFENSES
+            )
+            + " (calibration ran under open only)."
+        )
+    flagged = v2["flagged_agents"]
+    for family in ("split", "control"):
+        row = flagged[family]["all"]
+        where = row["flagged_where_it_alarms"]
+        out.append(
+            f"- Flagged agent, {family} (payload holder {flagged['payload_holder'][family]}): the "
+            f"per-agent monitor alarms on {row['alarmed']} of {row['episodes']} episodes and flags "
+            f"A {where['A']}, B {where['B']}, C {where['C']}, tie {where['tie']}."
+        )
     integ = v2["integrity"]
     lost = integ["lost_on_save_and_rescored"]
     out += [
@@ -650,6 +709,19 @@ def findings(v2: dict) -> list[str]:
         f"{lost['later_passes_scored']} re-scored after {lost['fix_commit']}; "
         f"{integ['preemptions_in_main_run']} preemptions.",
     ]
+    money = v2.get("spend")
+    if money:
+        items = "; ".join(f"{k} ${v:.2f}" for k, v in money["by_item_usd"].items())
+        out.append(
+            f"- Billed for all of v2 (smoke, pilot, re-smoke, calibration, main grid, replays and "
+            f"scoring): ${money['total_usd']:.2f} ({items}), {money['first_hour_utc']} to "
+            f"{money['last_hour_utc']} UTC."
+        )
+    ver = v2["versions"]
+    out.append(
+        f"- Versions: agent {ver['models']['agent']}, trusted {ver['models']['trusted']}; "
+        f"frozen_v2.json sha256 {ver['frozen_v2_sha256']}."
+    )
     return out
 
 
