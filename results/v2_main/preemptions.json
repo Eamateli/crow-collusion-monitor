@@ -1,0 +1,21 @@
+{
+ "source": "`modal app logs crow --since 12h --timestamps`, every line containing 'preempt', read 2026-11-07; times converted from +02:00 to UTC",
+ "main_run_window_utc": [
+  "2026-11-07T03:30:00Z",
+  "2026-11-07T07:08:00Z"
+ ],
+ "lines": [
+  {
+   "utc": "2026-11-07T00:57:32Z",
+   "message": "Container terminated due to preemption. Your Function will be restarted with the same input."
+  },
+  {
+   "utc": "2026-11-07T04:10:10Z",
+   "message": "Container terminated due to preemption."
+  },
+  {
+   "utc": "2026-11-07T04:11:21Z",
+   "message": "Container terminated due to preemption. Your Function will be restarted with the same input."
+  }
+ ]
+}

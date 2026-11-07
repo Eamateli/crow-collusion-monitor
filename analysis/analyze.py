@@ -8,10 +8,12 @@ endpoint and are cached next to the records; the human kappa is added by analysi
 
     python analysis/analyze.py MAIN_DIR [--label-routes] [--repeat 20]
     python analysis/analyze.py --pilot
+    python analysis/analyze.py --v2 results/raw/v2
 
 MAIN_DIR holds records/, events/ and workspaces/ (e.g. `modal volume get crow-results main`).
 --pilot needs no raw data: it refreshes only the s2_pilot section of numbers.json, from the
-committed results/pilot/monitor_repeat.json, and leaves every other number as it is.
+committed results/pilot/monitor_repeat.json, and leaves every other number as it is. --v2 refreshes
+only the v2 section, the 3-agent results (analysis/v2.py), and a v1 run keeps that section as is.
 """
 
 import argparse
@@ -568,6 +570,10 @@ def analyze(main_dir: Path, label_routes_n: bool, repeat_n: int) -> dict:
     figures = write_figures(numbers, roc)
     numbers["meta"]["tables"] = tables
     numbers["meta"]["figures"] = figures
+    if NUMBERS.exists():  # the 3-agent results are refreshed only by --v2
+        previous = json.loads(NUMBERS.read_text(encoding="utf-8"))
+        if "v2" in previous:
+            numbers["v2"] = previous["v2"]
     NUMBERS.write_text(json.dumps(numbers, indent=2) + "\n", encoding="utf-8")
     return numbers
 
@@ -633,6 +639,16 @@ def _run_repeatability(main_dir: Path, ok: list[dict], n: int, cache: Path) -> d
     return result
 
 
+def refresh_v2(raw: Path, numbers_path: Path = NUMBERS) -> dict:
+    """Only the v2 section of numbers.json; every other number stays as it is."""
+    from analysis.v2 import run
+
+    numbers = json.loads(numbers_path.read_text(encoding="utf-8")) if numbers_path.exists() else {}
+    numbers["v2"] = run(raw, git_commit())
+    numbers_path.write_text(json.dumps(numbers, indent=2) + "\n", encoding="utf-8")
+    return numbers["v2"]
+
+
 def refresh_pilot(numbers_path: Path = NUMBERS) -> dict:
     """Only the s2_pilot section of numbers.json; every other number stays as it is."""
     numbers = json.loads(numbers_path.read_text(encoding="utf-8"))
@@ -645,6 +661,7 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("main_dir", nargs="?")
     parser.add_argument("--pilot", action="store_true", help="refresh only the s2_pilot section")
+    parser.add_argument("--v2", metavar="RAW", help="refresh only the v2 section from this folder")
     parser.add_argument(
         "--label-routes", action="store_true", help="label routes (trusted endpoint)"
     )
@@ -652,6 +669,13 @@ def main(argv: list[str] | None = None) -> int:
         "--repeat", type=int, default=0, help="judge repeatability sample (endpoint)"
     )
     args = parser.parse_args(argv)
+    if args.v2:
+        v2 = refresh_v2(Path(args.v2))
+        m = v2["meta"]
+        print(f"numbers.json v2: {m['n_primary']} primary, {m['n_negatives']} negatives")
+        print(f"tables: {m['tables']}")
+        print(f"figures: {m['figures']}; findings: {m['findings']}")
+        return 0
     if args.pilot:
         pilot = refresh_pilot()
         print(f"numbers.json s2_pilot: {pilot['calls']} calls, rule {pilot['rule']}")
