@@ -25,7 +25,9 @@ from env.episode import EpisodeConfig, make_config, run_episode
 from env.replay import ARMS, arm_bases, arm_episode_id, arms_run_for, run_arm
 from experiments.grid import (
     ARMS_STAGE,
+    BILLED_RATIO,
     PROBE_FIRST_SEED,
+    SCORING_COST,
     arm_budget,
     calibration_configs,
     main_configs,
@@ -56,6 +58,7 @@ RUNS = ("smoke", "probe", "calibration", "main", "v2_smoke", "v2_intervention", 
 SCORING_TIMEOUT = 12 * 3600
 LAUNCHER_TIMEOUT = 20 * 3600  # it waits for the pass, so it outlasts it
 MAX_RUNNING = 12  # episodes or replays at a time (CLAUDE.md section 9)
+NO_TOKEN_LIMIT = 10**12  # a dollar limit is in force instead
 # Modal restarts a preempted function on the same input (modal.com/docs/guide/preemption). The two
 # drivers can't be, at 3x the CPU and memory price of a nearly idle container: a restarted launcher
 # would send episodes that are still running a second time. A preempted episode writes its record
@@ -317,9 +320,71 @@ def _new_state() -> dict:
         "failed": [],
         "exceptions": [],
         "tokens": 0,
+        "cost": 0.0,  # finished episodes and replays, at estimate prices
         "stopped_by_budget": False,
         "not_sent": {},
     }
+
+
+class DollarGuard:
+    """One limit in real dollars over the episodes, the replays and the scoring pass (addenda,
+    section 12). The pass runs hours behind the episodes, so a running total would see the money
+    too late: an episode's scoring counts from the moment it is sent, at the estimate for its role
+    until its real cost is known. An episode still running adds its own cost on top of the limit,
+    which is why the limit leaves room for that."""
+
+    def __init__(self, limit_usd: float, read_scored=None, refresh_s: float = 60.0, clock=None):
+        self.limit_usd = limit_usd
+        self.sent: dict[str, str] = {}  # episode_id -> role
+        self.scored: dict[str, float] = {}  # episode_id -> what its scoring cost
+        self._read_scored = read_scored
+        self._refresh_s = refresh_s
+        self._clock = clock or time.monotonic
+        self._last_read: float | None = None
+
+    def seed(self, records: list[dict], state: dict) -> None:
+        """What a run on the Volume has already spent, so that a re-launch counts it."""
+        for record in records:
+            state["cost"] += record.get("cost_estimate_usd") or 0
+            config = record.get("config") or {}
+            if "role" in config and "__intervene_" not in record["episode_id"]:
+                self.sent[record["episode_id"]] = config["role"]
+
+    def note_sent(self, job: dict) -> None:
+        config = job.get("config")  # a replay has no config: the pass never scores it
+        if config:
+            self.sent[config["episode_id"]] = config["role"]
+
+    def _refresh(self) -> None:
+        now = self._clock()
+        if self._read_scored is None:
+            return
+        if self._last_read is not None and now - self._last_read < self._refresh_s:
+            return
+        self._last_read = now
+        try:
+            self._read_scored(self.scored)
+        except Exception as error:  # noqa: BLE001 - the estimates stand until the next read
+            print(f"  scoring costs not read: {type(error).__name__}: {error}")
+
+    def projected_usd(self, state: dict) -> float:
+        scoring = sum(self.scored.get(e, SCORING_COST[role]) for e, role in self.sent.items())
+        return BILLED_RATIO * (state["cost"] + scoring)
+
+    def over(self, state: dict) -> bool:
+        self._refresh()
+        return self.projected_usd(state) >= self.limit_usd
+
+
+def _read_scored_costs(run: str, known: dict[str, float]) -> None:
+    """Add what the pass has spent on each newly scored episode of this run."""
+    for entry in volume.listdir(f"{run}/scores"):
+        name = Path(entry.path).name
+        episode_id = name.split("__a")[0]
+        if name.endswith(".json") and episode_id not in known:
+            data = json.loads(b"".join(volume.read_file(f"{run}/scores/{name}")))
+            if data.get("status") == "ok":
+                known[episode_id] = data["cost_estimate_usd"]
 
 
 def _run_jobs(
@@ -330,6 +395,7 @@ def _run_jobs(
     *,
     state: dict | None = None,
     workers: int = MAX_RUNNING,
+    guard: DollarGuard | None = None,
 ) -> dict:
     """Run jobs at most `workers` at a time. The budget guard is checked before each job is sent,
     so a stop leaves nothing queued; jobs already running finish and are counted. `state` lets
@@ -345,11 +411,13 @@ def _run_jobs(
 
     def work(job: dict) -> None:
         with lock:
-            if state["tokens"] >= max_tokens:
+            if state["tokens"] >= max_tokens or (guard is not None and guard.over(state)):
                 state["stopped_by_budget"] = True
                 stage = state.get("stage", "")
                 state["not_sent"][stage] = state["not_sent"].get(stage, 0) + 1
                 return
+            if guard is not None:
+                guard.note_sent(job)
         try:
             result = function.remote(job)
         except Exception as error:  # noqa: BLE001 - kept and reported, never dropped
@@ -360,6 +428,9 @@ def _run_jobs(
         with lock:
             state["finished"] += 1
             state["tokens"] += result["tokens"]
+            state["cost"] += result.get("cost") or 0
+            if guard is not None:
+                state["projected_usd"] = round(guard.projected_usd(state), 2)
             if result["status"] != "ok":
                 state["failed"].append(f"{result['episode_id']}: {result.get('reason')}")
             print(
@@ -394,6 +465,7 @@ def _launch_arms(
     arms: tuple[str, ...],
     max_tokens: int | None,
     state: dict | None = None,
+    guard: DollarGuard | None = None,
 ) -> dict:
     """Every arm on every matching finished episode of `base_run` (addenda, section 10)."""
     out_run = arms_run_for(base_run)
@@ -424,6 +496,7 @@ def _launch_arms(
         budget,
         lambda s: _write_json(out_run, "launcher.json", {**status, **s}),
         state=state,
+        guard=guard,
     )
     _write_json(out_run, "launcher.json", {**status, **state, "state": "done"})
     return state
@@ -444,12 +517,15 @@ def launch_run_remote(
     only: str = "",
     max_tokens: int | None = None,
     scoring_tokens: int | None = None,
+    max_usd: float | None = None,
 ) -> dict:
     """A whole 3-agent run, driven from inside Modal so that nothing local can end it: v1 lost 65
     episodes when its local driver stopped (addenda, section 12). It starts the scoring pass, runs
     the stages in order, says when the episodes are done, and waits for the pass. A second launch
     resumes from the Volume. `max_tokens` and `scoring_tokens` replace the estimate plus 10%. The
-    arms are a stage of v2_main, and are left out when `only` picks some of its episodes.
+    arms are a stage of v2_main, and are left out when `only` picks some of its episodes. With
+    `max_usd`, one limit in real dollars over everything replaces the episode token budget, and the
+    pass keeps its token budget only as a backstop.
     """
     if run not in V2_GRIDS:
         raise ValueError(f"not a 3-agent run: {run!r}")
@@ -472,7 +548,16 @@ def launch_run_remote(
     planned = [{"episode_id": c.episode_id, "status": "ok", "config": vars(c)} for c in configs]
     bases = len(arm_bases(planned)) if ARMS_STAGE in stages else 0
     budget = token_budget(configs, bases)
-    episode_budget = max_tokens or budget["episodes"]
+    episode_budget = max_tokens or (NO_TOKEN_LIMIT if max_usd else budget["episodes"])
+    state = _new_state()
+    guard = None
+    if max_usd:
+        guard = DollarGuard(max_usd, lambda known: _read_scored_costs(run, known))
+        for folder in (run, arms_run_for(run)):
+            try:
+                guard.seed(_records(folder), state)
+            except Exception as error:  # noqa: BLE001 - a new run has no records folder yet
+                print(f"  nothing spent in {folder} yet: {type(error).__name__}")
     status = {
         "state": "running",
         "configs": len(configs),
@@ -481,6 +566,7 @@ def launch_run_remote(
         "seeds": seeds,
         "episode_budget": episode_budget,
         "scoring_budget": scoring_tokens or budget["scoring"],
+        "max_usd": max_usd,
     }
     print(f"run {run}: {status}")
     _write_json(run, "launcher.json", status)
@@ -495,14 +581,19 @@ def launch_run_remote(
 
     def send_arms(current: dict) -> None:
         progress(current)  # the replays report to their own folder: show the stage here too
-        _launch_arms(run, "", ARMS, episode_budget, current)
+        _launch_arms(run, "", ARMS, episode_budget, current, guard)
         progress(current)
 
     state = _run_stages(
         stages,
-        _new_state(),
+        state,
         lambda group, current: _run_jobs(
-            run_episode_remote, to_run(group, run), episode_budget, progress, state=current
+            run_episode_remote,
+            to_run(group, run),
+            episode_budget,
+            progress,
+            state=current,
+            guard=guard,
         ),
         send_arms,
     )

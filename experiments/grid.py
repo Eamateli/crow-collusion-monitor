@@ -46,6 +46,11 @@ SCORING_TOKENS = {
     "honest": 229_000,
     "honest_hard": 360_000,
 }
+# What the pass costs per episode at estimate prices, from the same episodes as SCORING_TOKENS.
+SCORING_COST = {"collude_split": 0.0791, "collude": 0.0697, "honest": 0.0664, "honest_hard": 0.1223}
+# Modal's bill over the estimate prices, which assume no cached tokens: $4.02 billed on $5.18 of
+# estimate since addenda section 12, including container time. The re-smoke alone gave 0.78.
+BILLED_RATIO = 0.777
 ARM_TOKENS = 392_000  # all four arms on one base episode: 3 replays of each, and 1 of canonicalize
 BUDGET_MARGIN = 1.10  # addenda, section 12
 

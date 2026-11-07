@@ -3,6 +3,8 @@
 import ast
 import inspect
 
+import pytest
+
 from experiments import modal_app
 
 
@@ -149,9 +151,156 @@ def test_stages_share_one_budget():
 
 def test_the_arms_draw_on_the_runs_budget_not_their_own():
     source = _function("launch_run_remote")
-    assert "_launch_arms(run, '', ARMS, episode_budget, current)" in source
+    assert "_launch_arms(run, '', ARMS, episode_budget, current, guard)" in source
 
 
 def test_a_later_pass_keeps_what_an_earlier_one_failed():
     source = _function("score_run_remote")
     assert "scoring_summaries/" in source and "scoring_summary.json" in source
+
+
+# --- the dollar limit over the whole run (addenda, section 12) ---
+
+
+class Priced:
+    """A remote function whose episodes each cost `cost` at estimate prices."""
+
+    def __init__(self, cost=1.0):
+        self.sent, self.cost = [], cost
+
+    def remote(self, job):
+        self.sent.append(job["config"]["episode_id"] if "config" in job else job["arm"])
+        return {**_result("x"), "cost": self.cost}
+
+
+def _episode(name, role="honest"):
+    return {"config": {"episode_id": name, "role": role}}
+
+
+def _guard(limit, **options):
+    return modal_app.DollarGuard(limit, **options)
+
+
+def test_the_guard_counts_an_episodes_scoring_from_the_moment_it_is_sent():
+    guard, state = _guard(100.0), modal_app._new_state()
+    assert guard.projected_usd(state) == 0
+    guard.note_sent(_episode("a", "honest_hard"))  # still running: nothing has been billed for it
+    expected = modal_app.BILLED_RATIO * modal_app.SCORING_COST["honest_hard"]
+    assert guard.projected_usd(state) == pytest.approx(expected)
+
+
+def test_a_real_scoring_cost_replaces_the_estimate():
+    guard, state = _guard(100.0), modal_app._new_state()
+    guard.note_sent(_episode("a"))
+    guard.scored["a"] = 0.5
+    assert guard.projected_usd(state) == pytest.approx(modal_app.BILLED_RATIO * 0.5)
+
+
+def test_the_guard_applies_the_billed_ratio_to_episodes_too():
+    guard, state = _guard(100.0), modal_app._new_state()
+    state["cost"] = 10.0
+    assert guard.projected_usd(state) == pytest.approx(10.0 * modal_app.BILLED_RATIO)
+
+
+def test_replays_spend_money_but_commit_no_scoring():
+    guard, state = _guard(100.0), modal_app._new_state()
+    guard.note_sent({"arm": "replace_a", "base_stem": "x"})
+    assert guard.sent == {} and guard.projected_usd(state) == 0
+
+
+def test_a_dollar_stop_sends_nothing_more_and_counts_what_it_cut():
+    # Each episode: 1.0 of its own plus its scoring, at the billed ratio.
+    per_episode = modal_app.BILLED_RATIO * (1.0 + modal_app.SCORING_COST["honest"])
+    guard, fake, state = _guard(per_episode * 2 - 0.01), Priced(), modal_app._new_state()
+    state["stage"] = "careless"
+    jobs = [_episode(f"e{i}") for i in range(5)]
+    modal_app._run_jobs(fake, jobs, 10**12, lambda s: None, state=state, workers=1, guard=guard)
+    assert fake.sent == ["e0", "e1"]
+    assert state["stopped_by_budget"] is True and state["not_sent"] == {"careless": 3}
+    assert state["projected_usd"] == pytest.approx(per_episode * 2, abs=0.01)
+
+
+def test_with_the_real_grid_only_the_last_stage_is_cut_by_a_small_overrun():
+    from experiments.grid import v2_main_stages
+
+    def jobs(name):
+        return [{"config": vars(c)} for c in v2_main_stages()[name]]
+
+    cost = {"collude_split": 0.1249, "collude": 0.1468, "honest": 0.0677, "honest_hard": 0.0875}
+
+    class ByRole:
+        def __init__(self, overrun):
+            self.overrun, self.sent = overrun, []
+
+        def remote(self, job):
+            self.sent.append(job)
+            role = job["config"]["role"] if "config" in job else None
+            amount = cost[role] if role else 0.1693 / 4
+            return {**_result("x"), "cost": amount * self.overrun}
+
+    def run(overrun, limit=27.73):
+        guard, fake, state = _guard(limit), ByRole(overrun), modal_app._new_state()
+        stages = {name: jobs(name) for name in ("honest", "careful", "noplan", "careless")}
+        stages = {
+            "honest": stages["honest"],
+            "careful": stages["careful"],
+            "arms": [],
+            "noplan": stages["noplan"],
+            "careless": stages["careless"],
+        }
+        arm_jobs = [{"arm": str(i)} for i in range(120)]
+
+        def episodes(group, current):
+            modal_app._run_jobs(
+                fake, group, 10**12, lambda s: None, state=current, workers=1, guard=guard
+            )
+
+        def arms(current):
+            modal_app._run_jobs(
+                fake, arm_jobs, 10**12, lambda s: None, state=current, workers=1, guard=guard
+            )
+
+        return modal_app._run_stages(stages, state, episodes, arms)
+
+    assert run(1.0)["not_sent"] == {}  # the estimate fits under the limit
+    assert set(run(1.15)["not_sent"]) == {"careless"}
+    assert set(run(1.40)["not_sent"]) >= {"noplan", "careless"}  # a limit, not a promise
+
+
+def test_a_failed_read_of_the_scoring_costs_keeps_the_estimates():
+    def broken(known):
+        raise OSError("volume busy")
+
+    guard, state = _guard(100.0, read_scored=broken), modal_app._new_state()
+    guard.note_sent(_episode("a"))
+    assert guard.over(state) is False
+    assert "a" not in guard.scored
+
+
+def test_the_scoring_costs_are_read_at_most_once_a_minute():
+    reads, now = [], [0.0]
+    guard = _guard(100.0, read_scored=lambda known: reads.append(1), clock=lambda: now[0])
+    state = modal_app._new_state()
+    guard.over(state), guard.over(state)
+    assert len(reads) == 1
+    now[0] = 61.0
+    guard.over(state)
+    assert len(reads) == 2
+
+
+def test_a_relaunch_counts_what_the_run_already_spent():
+    guard, state = _guard(100.0), modal_app._new_state()
+    guard.seed(
+        [
+            {"episode_id": "a", "cost_estimate_usd": 2.0, "config": {"role": "honest"}},
+            {
+                "episode_id": "b__intervene_replace_a",
+                "cost_estimate_usd": 1.0,
+                "config": {"role": "honest"},
+            },
+            {"episode_id": "c", "cost_estimate_usd": None, "config": {"role": "collude"}},
+        ],
+        state,
+    )
+    assert state["cost"] == 3.0
+    assert guard.sent == {"a": "honest", "c": "collude"}  # a replay is never scored

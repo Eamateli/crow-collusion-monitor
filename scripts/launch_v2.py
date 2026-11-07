@@ -5,7 +5,7 @@ at any moment and the episodes still finish and get scored (addenda, section 12)
 again whenever the code or crow/frozen_v2.json changes: `modal deploy experiments/modal_app.py`.
 
     python scripts/launch_v2.py --run v2_calibration [--watch]
-    python scripts/launch_v2.py --run v2_main [--watch]
+    python scripts/launch_v2.py --run v2_main --max-usd 27.73 [--watch]
     python scripts/launch_v2.py --arms canonicalize_before_c --base-run v2_resmoke --only s3106
     python scripts/launch_v2.py --score v2_calibration --scoring-tokens 3000000
     python scripts/launch_v2.py --status v2_calibration
@@ -50,6 +50,8 @@ def status(run: str) -> dict:
         "stage": launcher.get("stage"),
         "tokens": launcher.get("tokens"),
         "episode_budget": launcher.get("episode_budget"),
+        "max_usd": launcher.get("max_usd"),
+        "projected_usd": launcher.get("projected_usd"),
         "not_sent": launcher.get("not_sent"),
         "configs": launcher.get("configs"),
         "failed": launcher.get("failed", []),
@@ -91,6 +93,7 @@ def main() -> int:
     parser.add_argument("--seeds", type=int, help="v2_main only: replaces the registered number")
     parser.add_argument("--max-tokens", type=int, help="replaces the estimate plus 10%%")
     parser.add_argument("--scoring-tokens", type=int, help="replaces the estimate plus 10%%")
+    parser.add_argument("--max-usd", type=float, help="one real-dollar limit over the whole run")
     parser.add_argument("--only", default="")
     parser.add_argument("--arms", help="comma-separated arms to run alone, on --base-run")
     parser.add_argument("--base-run")
@@ -120,7 +123,9 @@ def main() -> int:
     if args.run == "v2_main":
         _check_frozen()
     function = modal.Function.from_name(APP, "launch_run_remote")
-    call = function.spawn(args.run, args.seeds, args.only, args.max_tokens, args.scoring_tokens)
+    call = function.spawn(
+        args.run, args.seeds, args.only, args.max_tokens, args.scoring_tokens, args.max_usd
+    )
     print(f"{args.run} running server-side: {call.object_id}", flush=True)
     if args.watch:
         watch(args.run)
