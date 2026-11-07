@@ -43,8 +43,8 @@ EPISODE_TOKENS = {
 SCORING_TOKENS = {
     "collude_split": 248_000,
     "collude": 242_000,
-    "honest": 230_000,
-    "honest_hard": 378_000,
+    "honest": 229_000,
+    "honest_hard": 360_000,
 }
 ARM_TOKENS = 392_000  # all four arms on one base episode: 3 replays of each, and 1 of canonicalize
 BUDGET_MARGIN = 1.10  # addenda, section 12

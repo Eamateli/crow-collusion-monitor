@@ -150,3 +150,8 @@ def test_stages_share_one_budget():
 def test_the_arms_draw_on_the_runs_budget_not_their_own():
     source = _function("launch_run_remote")
     assert "_launch_arms(run, '', ARMS, episode_budget, current)" in source
+
+
+def test_a_later_pass_keeps_what_an_earlier_one_failed():
+    source = _function("score_run_remote")
+    assert "scoring_summaries/" in source and "scoring_summary.json" in source

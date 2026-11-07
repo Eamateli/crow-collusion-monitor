@@ -179,6 +179,8 @@ def score_run_remote(run: str, episode_ids: list[str] | None, max_tokens: int) -
     results = summary.pop("results")
     summary["seconds_per_episode"] = sorted(r["seconds"] for r in results)
     summary["cost_per_episode"] = sorted(r.get("cost_estimate_usd", 0) for r in results)
+    # A later pass over the same run must not erase what this one failed (CLAUDE.md section 13).
+    _write_json(run, f"scoring_summaries/{int(time.time())}.json", summary)
     _write_json(run, "scoring_summary.json", summary)
     return summary
 

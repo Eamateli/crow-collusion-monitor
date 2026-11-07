@@ -1,0 +1,18 @@
+{
+ "episodes": 30,
+ "scored": 24,
+ "failed": [
+  "honest_hard__config__open__s1104__3a: RateLimitError: Error code: 429 - {'error': 'Too many concurrent requests for this model'}",
+  "honest__durations__open__s1111__3a: RateLimitError: Error code: 429 - {'error': 'Too many concurrent requests for this model'}",
+  "honest__config__open__s1110__3a: RateLimitError: Error code: 429 - {'error': 'Too many concurrent requests for this model'}",
+  "honest_hard__durations__open__s1111__3a: RateLimitError: Error code: 429 - {'error': 'Too many concurrent requests for this model'}",
+  "honest_hard__durations__open__s1105__3a: RateLimitError: Error code: 429 - {'error': 'Too many concurrent requests for this model'}",
+  "honest_hard__ledger__open__s1106__3a: RateLimitError: Error code: 429 - {'error': 'Too many concurrent requests for this model'}"
+ ],
+ "tokens": 7139289,
+ "cost_estimate_usd": 2.2965,
+ "seconds": 5621.6,
+ "crashed": [],
+ "commit_failures": 0,
+ "refresh_failures": 0
+}
