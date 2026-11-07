@@ -606,3 +606,75 @@ def test_following_stops_at_the_marker_with_a_failed_episode_left_behind(tmp_pat
     summary = follow(tmp_path, Counting(), lambda: run_finished(tmp_path, ids), sleep=tick)
     assert summary["grid_finished"] and not summary["stopped_idle"]
     assert summary["scored"] == 1 and summary["not_scorable"] == ["broke: episode failed"]
+
+
+# --- a finished result is paid for: a refused write must not lose it ---
+
+
+def test_a_refused_write_waits_and_keeps_the_result(tmp_path):
+    from pathlib import Path
+    from unittest import mock
+
+    from experiments.score_v2 import WRITE_WAIT_S, _save_result
+
+    real, calls = Path.write_text, []
+
+    def refused_twice(self, *args, **kwargs):
+        calls.append(1)
+        if len(calls) <= 2:
+            raise PermissionError(1, "Operation not permitted")
+        return real(self, *args, **kwargs)
+
+    target = tmp_path / "scores" / "e.json"
+    with (
+        mock.patch.object(Path, "write_text", refused_twice),
+        mock.patch("experiments.score_v2.time.sleep") as sleep,
+    ):
+        _save_result(target, {"status": "ok"})
+    assert json.loads(target.read_text()) == {"status": "ok"}
+    assert [c.args[0] for c in sleep.call_args_list] == [WRITE_WAIT_S, WRITE_WAIT_S]
+    assert not target.with_suffix(".tmp").exists()
+
+
+def test_a_write_refused_for_good_still_raises(tmp_path):
+    from pathlib import Path
+    from unittest import mock
+
+    from experiments.score_v2 import WRITE_TRIES, _save_result
+
+    def refused(self, *args, **kwargs):
+        refused.calls += 1
+        raise PermissionError(1, "Operation not permitted")
+
+    refused.calls = 0
+    with (
+        mock.patch.object(Path, "write_text", refused),
+        mock.patch("experiments.score_v2.time.sleep"),
+        pytest.raises(PermissionError),
+    ):
+        _save_result(tmp_path / "e.json", {"status": "ok"})
+    assert refused.calls == WRITE_TRIES
+
+
+def test_other_write_errors_are_not_waited_on(tmp_path):
+    from pathlib import Path
+    from unittest import mock
+
+    from experiments.score_v2 import _save_result
+
+    def full(self, *args, **kwargs):
+        raise OSError(28, "No space left on device")
+
+    with (
+        mock.patch.object(Path, "write_text", full),
+        mock.patch("experiments.score_v2.time.sleep") as sleep,
+        pytest.raises(OSError, match="No space"),
+    ):
+        _save_result(tmp_path / "e.json", {"status": "ok"})
+    assert sleep.call_count == 0
+
+
+def test_the_wait_outlasts_the_pass_reloading_the_volume():
+    from experiments.score_v2 import POLL_S, WRITE_TRIES, WRITE_WAIT_S
+
+    assert (WRITE_TRIES - 1) * WRITE_WAIT_S > 3 * POLL_S

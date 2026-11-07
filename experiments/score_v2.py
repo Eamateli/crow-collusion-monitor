@@ -43,6 +43,7 @@ ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_REQUESTS = 12
 MAX_EPISODE_ATTEMPTS = 2  # as experiments/modal_app.py, to_run: a third attempt never comes
 POLL_S, MAX_IDLE_S = 30.0, 3600.0
+WRITE_TRIES, WRITE_WAIT_S = 8, 15.0  # outlasts a Volume reload, which comes every POLL_S
 DONE_MARKER = "episodes_done"  # in the run folder, once the runner's episodes have all ended
 FROZEN_RUNS = ("main", "v2_main")  # these run folders are scored only with crow/frozen_v2.json
 MAX_TOTAL_TOKENS = 40_000_000  # for a pass run by hand; a launched run passes its own guard
@@ -104,6 +105,24 @@ def _tokens(calls: list) -> dict[str, int]:
     }
 
 
+def _save_result(path: Path, result: dict) -> None:
+    """Write a result in one step, so resume never trusts a half-written file. The monitor calls
+    are already paid for by now, so a refused write waits: in the main grid, 52 finished results
+    were lost to PermissionError in the window when the pass was reloading the Modal Volume."""
+    text = json.dumps(result, ensure_ascii=False, indent=1)
+    temporary = path.with_suffix(".tmp")
+    for attempt in range(WRITE_TRIES):
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            temporary.write_text(text, encoding="utf-8")
+            temporary.replace(path)
+            return
+        except PermissionError:
+            if attempt == WRITE_TRIES - 1:
+                raise
+            time.sleep(WRITE_WAIT_S)
+
+
 def score_episode(episode: SavedEpisode, client: Any, cfg: Config, monitor_calls: int) -> dict:
     """Score one episode and write scores/<stem>.json. An endpoint failure after the retries is
     recorded as failed, and a later pass tries that episode again."""
@@ -138,10 +157,7 @@ def score_episode(episode: SavedEpisode, client: Any, cfg: Config, monitor_calls
         result["status"] = "failed"
         result["reason"] = f"{type(e).__name__}: {e}"
     result["seconds"] = round(time.time() - started, 2)
-    episode.out_path.parent.mkdir(parents=True, exist_ok=True)
-    temporary = episode.out_path.with_suffix(".tmp")
-    temporary.write_text(json.dumps(result, ensure_ascii=False, indent=1), encoding="utf-8")
-    temporary.replace(episode.out_path)  # never leaves a half-written file for resume to trust
+    _save_result(episode.out_path, result)
     return result
 
 
