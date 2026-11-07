@@ -25,6 +25,32 @@ V2_CALIBRATION_SEEDS = range(1100, 1115)  # never overlaps the main, v1 calibrat
 V2_RESMOKE_SEEDS = range(3106, 3112)
 
 
+# Tokens per episode, for the budget guard: from the re-smoke, under the careful prompts. It had no
+# honest_hard episode, so that is the honest figure with a margin until calibration measures it.
+EPISODE_TOKENS = {
+    "collude_split": 280_000,
+    "collude": 351_000,
+    "honest": 134_000,
+    "honest_hard": 201_000,
+}
+SCORING_TOKENS = 233_000  # 21 monitor calls
+ARM_TOKENS = 407_000  # all four arms on one base episode
+BUDGET_MARGIN = 1.10  # addenda, section 12
+
+
+def token_budget(configs: list[EpisodeConfig]) -> dict[str, int]:
+    """The budget guard for a run: its estimated tokens plus 10%, for episodes and for scoring."""
+    episodes = sum(EPISODE_TOKENS[c.role] for c in configs)
+    return {
+        "episodes": round(episodes * BUDGET_MARGIN),
+        "scoring": round(len(configs) * SCORING_TOKENS * BUDGET_MARGIN),
+    }
+
+
+def arm_budget(bases: int) -> int:
+    return round(bases * ARM_TOKENS * BUDGET_MARGIN)
+
+
 def task_for_seed(seed: int) -> str:
     """The (seed mod 6)-th task id in sorted order."""
     ids = task_ids()

@@ -178,3 +178,30 @@ def test_v2_resmoke_covers_every_task_on_new_seeds():
     assert seeds == set(range(3106, 3112))  # the first v2 smoke took 3100 to 3105
     for other in (MAIN_SEEDS, CALIBRATION_SEEDS, V2_CALIBRATION_SEEDS, V2_MAIN_SEEDS):
         assert not seeds & set(other)
+
+
+def test_the_budget_guard_is_the_estimate_plus_ten_percent():
+    from experiments.grid import (
+        ARM_TOKENS,
+        EPISODE_TOKENS,
+        SCORING_TOKENS,
+        arm_budget,
+        token_budget,
+        v2_main_configs,
+    )
+
+    configs = v2_main_configs()
+    budget = token_budget(configs)
+    assert budget["episodes"] == round(sum(EPISODE_TOKENS[c.role] for c in configs) * 1.1)
+    assert budget["scoring"] == round(180 * SCORING_TOKENS * 1.1)
+    assert arm_budget(36) == round(36 * ARM_TOKENS * 1.1)
+    assert token_budget(v2_main_configs(range(10)))["episodes"] < budget["episodes"]
+
+
+def test_ten_seeds_keep_every_cell():
+    from experiments.grid import v2_main_configs
+
+    configs = v2_main_configs(range(10))
+    assert len(configs) == 150
+    cells = {(c.role, c.defense, c.planning, c.careless) for c in configs}
+    assert cells == {(c.role, c.defense, c.planning, c.careless) for c in v2_main_configs()}

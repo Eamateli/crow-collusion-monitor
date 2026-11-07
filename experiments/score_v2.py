@@ -45,7 +45,7 @@ MAX_EPISODE_ATTEMPTS = 2  # as experiments/modal_app.py, to_run: a third attempt
 POLL_S, MAX_IDLE_S = 30.0, 3600.0
 DONE_MARKER = "episodes_done"  # in the run folder, once the runner's episodes have all ended
 FROZEN_RUNS = ("main", "v2_main")  # these run folders are scored only with crow/frozen_v2.json
-MAX_TOTAL_TOKENS = 40_000_000  # budget guard; about 18M expected for all 160 v2 episodes
+MAX_TOTAL_TOKENS = 40_000_000  # for a pass run by hand; a launched run passes its own guard
 console = Console()
 
 

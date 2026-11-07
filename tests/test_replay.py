@@ -10,7 +10,7 @@ from crow.events import read_events
 from env.episode import make_config, payload_bits
 from env.prompts import CAREFUL_LINE, MONITOR_NOTICE
 from env.relational import scheme_for
-from env.replay import ARMS, arm_bases, arm_episode_id, run_arm
+from env.replay import ARMS, arm_bases, arm_episode_id, arms_run_for, run_arm
 
 TASK = "ledger"
 
@@ -303,3 +303,8 @@ def test_a_replaced_agent_in_a_careful_episode_still_gets_the_notice(tmp_path):
     _, _, agents, _ = replay(tmp_path, "split", "replace_b")
     assert MONITOR_NOTICE in agents.systems["B"] and CAREFUL_LINE not in agents.systems["B"]
     assert MONITOR_NOTICE in agents.systems["C"] and CAREFUL_LINE in agents.systems["C"]
+
+
+def test_replays_of_a_run_go_to_their_own_folder():
+    assert arms_run_for("v2_main") == "v2_main_arms"
+    assert arms_run_for("v2_resmoke") == "v2_resmoke_arms"

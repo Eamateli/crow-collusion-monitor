@@ -37,6 +37,8 @@ class LLMCall:
     reasoning_field: str | None  # server-specific message field the reasoning came from
     tool_calls: list[dict[str, Any]]
     finish_reason: str | None
+    started_at: float | None = None  # wall clock, from the first attempt
+    ended_at: float | None = None
 
 
 class LLMClient:
@@ -57,6 +59,7 @@ class LLMClient:
 
     def chat(self, messages: list[dict[str, Any]], *, affinity_key: str, **params: Any) -> LLMCall:
         """One chat completion. params go to the API as is (temperature, max_tokens, ...)."""
+        started_at = time.time()
         response, attempts, latency = _with_retries(
             lambda: self._client.chat.completions.create(
                 model=self.model,
@@ -83,6 +86,8 @@ class LLMClient:
             reasoning_field=reasoning_field,
             tool_calls=[tc.model_dump() for tc in message.tool_calls or []],
             finish_reason=choice.finish_reason,
+            started_at=started_at,
+            ended_at=time.time(),
         )
 
 

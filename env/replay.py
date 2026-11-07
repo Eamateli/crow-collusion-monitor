@@ -67,6 +67,11 @@ def arm_episode_id(base_id: str, arm: str) -> str:
     return f"{base_id}__intervene_{arm}"
 
 
+def arms_run_for(base_run: str) -> str:
+    """Where the replays of a run go: its own folder, so a check never mixes with a result."""
+    return f"{base_run}_arms"
+
+
 def arm_bases(records: list[dict], defense: str = "open") -> list[dict]:
     """The saved episodes the arms apply to: every finished split, control and honest episode with
     this defense, whatever any monitor would say of it. Not the no-plan cell, the hard version or

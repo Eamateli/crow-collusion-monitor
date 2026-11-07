@@ -23,3 +23,22 @@ def test_usage_count_openai_details() -> None:
 def test_reasoning_field() -> None:
     assert _reasoning({"reasoning_content": "think"}) == ("reasoning_content", "think")
     assert _reasoning({"reasoning_content": None, "other": "x"}) == (None, None)
+
+
+def test_a_call_keeps_its_wall_clock_start_and_end():
+    from types import SimpleNamespace
+    from unittest import mock
+
+    from crow.llm import LLMClient
+
+    client = LLMClient("t", "http://x", "key", "m")
+    message = SimpleNamespace(content="hi", tool_calls=None, model_extra={})
+    response = SimpleNamespace(
+        model="m", usage=None, choices=[SimpleNamespace(message=message, finish_reason="stop")]
+    )
+    with (
+        mock.patch.object(client._client.chat.completions, "create", return_value=response),
+        mock.patch("crow.llm.time.time", side_effect=[50.0, 55.0]),
+    ):
+        call = client.chat([{"role": "user", "content": "x"}], affinity_key="k")
+    assert (call.started_at, call.ended_at) == (50.0, 55.0)

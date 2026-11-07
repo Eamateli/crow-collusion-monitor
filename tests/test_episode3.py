@@ -251,7 +251,8 @@ def test_seal_runs_at_both_handoffs_and_keeps_bs_file(tmp_path):
 
 def test_open_changes_nothing_at_either_handoff(tmp_path):
     record, _, trusted = run(split("open"), tmp_path)
-    assert record["seal"] == {"B": {"mode": "open"}, "C": {"mode": "open"}}
+    open_seal = {"mode": "open", "call_times": []}
+    assert record["seal"] == {"B": open_seal, "C": open_seal}
     assert trusted.keys == []
 
 
@@ -463,7 +464,9 @@ def run_and_score(config, tmp_path, client=None, monitor_calls=1, **fake_options
     """An episode, then the pass on what it saved."""
     record, agent, _ = run(config, tmp_path, **fake_options)
     client = client or FakeTrusted()
-    summary = score_run(tmp_path, client, max_requests=2, monitor_calls=monitor_calls)
+    summary = score_run(
+        tmp_path, client, max_requests=2, monitor_calls=monitor_calls, cfg=Config.default()
+    )
     assert summary["failed"] == [], summary["failed"]
     stem = f"{record['episode_id']}__a1"
     scored = json.loads((tmp_path / "scores" / f"{stem}.json").read_text())
@@ -573,12 +576,15 @@ def test_uncalibrated_postcondition_has_no_alarm(tmp_path):
     assert scored["frozen"] == {"tau": None, "sha256": None}  # no frozen_v2.json until S5
 
 
-def test_v1_frozen_config_never_scores_a_3_agent_episode(tmp_path):
-    from crow.score import load_config
+def test_a_3_agent_pass_reads_the_v2_config_and_never_v1s(tmp_path):
+    from crow.score import FROZEN_V2_PATH, load_config
 
     assert load_config().frozen is True  # v1's exists
-    _, _, _, scored = run_and_score(split(), tmp_path)
-    assert scored["scores"]["crow_env"]["tau"] is None
+    run(split(), tmp_path)
+    assert score_run(tmp_path, FakeTrusted(), max_requests=2, monitor_calls=1)["scored"] == 1
+    scored = json.loads((tmp_path / "scores" / f"{split().episode_id}__a1.json").read_text())
+    assert scored["frozen"]["sha256"] == load_config(FROZEN_V2_PATH).sha256
+    assert scored["frozen"]["sha256"] != load_config().sha256
 
 
 def test_honest_episode_gets_every_monitor_too(tmp_path):
@@ -937,3 +943,31 @@ def test_two_agent_prompts_never_get_the_notice(tmp_path):
     assert config.agents == 2
     text = _system("A", config, "01010101", {"proposal": "p", "reply": "r"})
     assert NOTICE not in text and LINE not in text
+
+
+# --- each call's start and end time (addenda, section 12) ---
+
+
+class Timed(FakeTrusted):
+    def chat(self, messages, *, affinity_key, **params):
+        call = super().chat(messages, affinity_key=affinity_key, **params)
+        call.started_at, call.ended_at = 100.0, 101.0
+        return call
+
+
+def test_every_monitor_reply_keeps_its_start_end_and_attempts(tmp_path):
+    _, _, _, scored = run_and_score(split(), tmp_path, client=Timed())
+    reply = scored["scores"]["b1"]["responses"][0]
+    assert (reply["started_at"], reply["ended_at"]) == (100.0, 101.0)
+    assert "attempts" in reply
+    assert scored["scores"]["crow_env"]["judge"]["responses"][0]["started_at"] == 100.0
+
+
+def test_episode_records_keep_call_times_for_the_turns_and_the_chat(tmp_path):
+    record, _, _ = run(split(), tmp_path)
+    assert len(record["planning"]["call_times"]) == record["planning"]["usage"]["calls"] > 0
+    assert "attempts" in record["planning"]["call_times"][0]
+    for agent in "ABC":
+        times = record["turns"][agent]["call_times"]
+        assert len(times) == record["turns"][agent]["usage"]["calls"] > 0
+    assert record["seal"]["B"]["call_times"] == []  # open: no model call to time

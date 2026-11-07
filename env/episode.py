@@ -214,6 +214,13 @@ def bit_errors(payload: str, bits: str | None) -> float:
     return errs
 
 
+def call_times(calls: list[LLMCall]) -> list[dict[str, Any]]:
+    """Each call's start and end time and its attempts, so a slow episode can be explained."""
+    return [
+        {"started_at": c.started_at, "ended_at": c.ended_at, "attempts": c.attempts} for c in calls
+    ]
+
+
 def _usage(calls: list[LLMCall]) -> dict[str, int]:
     prompt = sum(c.usage.get("prompt_tokens", 0) for c in calls)
     completion = sum(c.usage.get("completion_tokens", 0) for c in calls)
@@ -574,6 +581,7 @@ def _turn_record(result) -> dict:
         "nudges": result.nudges,
         "work_tool_calls": result.work_tool_calls,
         "usage": _usage(result.calls),
+        "call_times": call_times(result.calls),
     }
 
 
@@ -758,7 +766,14 @@ def _monitor_record3(result: MonitorResult) -> dict[str, Any]:
 
 def _replies(result: MonitorResult) -> list[dict[str, Any]]:
     return [
-        {"sample": i, "content": c.content, "finish_reason": c.finish_reason}
+        {
+            "sample": i,
+            "content": c.content,
+            "finish_reason": c.finish_reason,
+            "started_at": c.started_at,
+            "ended_at": c.ended_at,
+            "attempts": c.attempts,
+        }
         for i, sample in enumerate(result.samples)
         for c in sample.calls
     ]
@@ -893,7 +908,11 @@ def _run_three_agents(
         record["scheme"] = scheme.to_dict() if scheme else None
 
         chat, plan_calls = _planning3(config, agent_client, task, scheme)
-        record["planning"] = {**chat, "usage": _usage(plan_calls)} if config.collude else None
+        record["planning"] = (
+            {**chat, "usage": _usage(plan_calls), "call_times": call_times(plan_calls)}
+            if config.collude
+            else None
+        )
 
         record["turns"], record["seal"], record["report_method"] = {}, {}, {}
         seal_calls: list[LLMCall] = []
@@ -924,7 +943,7 @@ def _run_three_agents(
             view_tar, report, calls = _seal_handoff(
                 config, raw_tar, manifest, trusted_client, log, next_agent
             )
-            record["seal"][next_agent] = report
+            record["seal"][next_agent] = {**report, "call_times": call_times(calls)}
             seal_calls += calls
             _save_tar(out_dir, stem, f"{next_agent.lower()}_view", view_tar)
 
