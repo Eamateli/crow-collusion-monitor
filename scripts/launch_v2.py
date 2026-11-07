@@ -5,8 +5,9 @@ at any moment and the episodes still finish and get scored (addenda, section 12)
 again whenever the code or crow/frozen_v2.json changes: `modal deploy experiments/modal_app.py`.
 
     python scripts/launch_v2.py --run v2_calibration [--watch]
-    python scripts/launch_v2.py --run v2_main --seeds 12 --arms-after [--watch]
+    python scripts/launch_v2.py --run v2_main [--watch]
     python scripts/launch_v2.py --arms canonicalize_before_c --base-run v2_resmoke --only s3106
+    python scripts/launch_v2.py --score v2_calibration --scoring-tokens 3000000
     python scripts/launch_v2.py --status v2_calibration
 """
 
@@ -46,6 +47,10 @@ def status(run: str) -> dict:
         "records": counts["records"],
         "scores": counts["scores"],
         "state": launcher.get("state"),
+        "stage": launcher.get("stage"),
+        "tokens": launcher.get("tokens"),
+        "episode_budget": launcher.get("episode_budget"),
+        "not_sent": launcher.get("not_sent"),
         "configs": launcher.get("configs"),
         "failed": launcher.get("failed", []),
         "exceptions": launcher.get("exceptions", []),
@@ -83,18 +88,25 @@ def watch(run: str) -> None:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     parser.add_argument("--run")
-    parser.add_argument("--seeds", type=int, help="v2_main only: 12 or 10")
+    parser.add_argument("--seeds", type=int, help="v2_main only: replaces the registered number")
     parser.add_argument("--max-tokens", type=int, help="replaces the estimate plus 10%%")
     parser.add_argument("--scoring-tokens", type=int, help="replaces the estimate plus 10%%")
     parser.add_argument("--only", default="")
-    parser.add_argument("--arms-after", action="store_true")
     parser.add_argument("--arms", help="comma-separated arms to run alone, on --base-run")
     parser.add_argument("--base-run")
+    parser.add_argument("--score", help="score what this run has no ok score for, then stop")
     parser.add_argument("--status")
     parser.add_argument("--watch", action="store_true")
     args = parser.parse_args()
     if args.status:
         print(json.dumps(status(args.status), indent=1))
+        return 0
+    if args.score:
+        if not args.scoring_tokens:
+            parser.error("--score needs --scoring-tokens")
+        function = modal.Function.from_name(APP, "score_run_remote")
+        call = function.spawn(args.score, None, args.scoring_tokens)
+        print(f"scoring {args.score} server-side: {call.object_id}")
         return 0
     if args.arms:
         if not args.base_run:
@@ -108,9 +120,7 @@ def main() -> int:
     if args.run == "v2_main":
         _check_frozen()
     function = modal.Function.from_name(APP, "launch_run_remote")
-    call = function.spawn(
-        args.run, args.seeds, args.only, args.max_tokens, args.scoring_tokens, args.arms_after
-    )
+    call = function.spawn(args.run, args.seeds, args.only, args.max_tokens, args.scoring_tokens)
     print(f"{args.run} running server-side: {call.object_id}", flush=True)
     if args.watch:
         watch(args.run)

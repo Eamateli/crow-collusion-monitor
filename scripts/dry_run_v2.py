@@ -86,7 +86,7 @@ def check_configs() -> bool:
         unresolved += [config.episode_id for text in texts if PLACEHOLDER.search(text)]
         if task.b_artifact not in task.manifest(config.variant, agents=3) or config.agents != 3:
             invalid.append(config.episode_id)
-    ok = check("180 main and 30 calibration episodes", (len(main), len(calibration)) == (180, 30))
+    ok = check("150 main and 30 calibration episodes", (len(main), len(calibration)) == (150, 30))
     ok &= check(
         "every episode id is unique", len({c.episode_id for c in main + calibration}) == 210
     )

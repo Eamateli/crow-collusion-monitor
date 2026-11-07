@@ -19,7 +19,7 @@ def test_the_scoring_timeout_is_within_modals_limit_and_covers_the_estimate():
 
 
 def test_the_grids_are_the_v2_ones():
-    assert len(modal_app.V2_GRIDS["v2_main"]()) == 180
+    assert len(modal_app.V2_GRIDS["v2_main"]()) == 150
     assert len(modal_app.V2_GRIDS["v2_calibration"]()) == 30
     assert len(modal_app.V2_GRIDS["v2_resmoke"]()) == 6
 
@@ -33,7 +33,7 @@ def _function(name: str) -> str:
 def test_the_launcher_tells_the_pass_when_its_episodes_have_ended():
     source = _function("launch_run_remote")
     assert source.index("_set_episodes_done(run, False)") < source.index("score_run_remote.spawn")
-    assert source.index("_run_jobs(") < source.index("_set_episodes_done(run, True)")
+    assert source.index("_run_stages(") < source.index("_set_episodes_done(run, True)")
     assert source.index("_set_episodes_done(run, True)") < source.index("scoring.get()")
 
 
@@ -98,3 +98,55 @@ def test_a_status_file_that_cannot_be_written_does_not_stop_the_run():
 def test_at_most_twelve_run_at_once():
     assert modal_app.MAX_RUNNING == 12
     assert "max_containers=12" in inspect.getsource(modal_app)
+
+
+def test_the_drivers_cannot_be_preempted_and_episodes_can():
+    for name in ("launch_run_remote", "launch_arms_remote", "score_run_remote"):
+        assert "nonpreemptible=True" in _function(name), name
+    assert "nonpreemptible" not in _function("run_episode_remote")
+
+
+# --- a budget stop cuts only the last stages (addenda, section 12) ---
+
+
+def _staged(budget, sent_tokens=100):
+    stages = {"honest": ["h1", "h2"], "careful": ["c1", "c2"], "arms": [], "noplan": ["n1"]}
+    fake = Remote()
+
+    def episodes(jobs, state):
+        modal_app._run_jobs(fake, jobs, budget, lambda s: None, state=state, workers=1)
+
+    def arms(state):
+        modal_app._run_jobs(fake, ["a1", "a2"], budget, lambda s: None, state=state, workers=1)
+
+    state = modal_app._run_stages(stages, modal_app._new_state(), episodes, arms)
+    return fake, state
+
+
+def test_with_budget_left_every_stage_runs_in_order():
+    fake, state = _staged(10**6)
+    assert fake.sent == ["h1", "h2", "c1", "c2", "a1", "a2", "n1"]
+    assert state["stopped_by_budget"] is False and state["not_sent"] == {}
+
+
+def test_a_budget_stop_cuts_the_last_stages_and_counts_what_it_cut():
+    fake, state = _staged(400)
+    assert fake.sent == ["h1", "h2", "c1", "c2"]
+    assert state["stopped_by_budget"] is True
+    assert state["not_sent"] == {"arms": 2, "noplan": 1}
+
+
+def test_a_stop_inside_a_stage_keeps_the_earlier_ones_whole():
+    fake, state = _staged(300)
+    assert fake.sent == ["h1", "h2", "c1"]
+    assert state["not_sent"] == {"careful": 1, "arms": 2, "noplan": 1}
+
+
+def test_stages_share_one_budget():
+    _, state = _staged(10**6)
+    assert state["tokens"] == 700 and state["finished"] == 7
+
+
+def test_the_arms_draw_on_the_runs_budget_not_their_own():
+    source = _function("launch_run_remote")
+    assert "_launch_arms(run, '', ARMS, episode_budget, current)" in source

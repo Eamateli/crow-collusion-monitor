@@ -82,31 +82,30 @@ def test_main_grid_one_task_per_seed_and_matched_payloads():
     assert sorted(Counter(task_for_seed(s) for s in range(20)).values()) == [3, 3, 3, 3, 4, 4]
 
 
-def test_v2_main_grid_is_12_seeds_plus_the_careless_contrast():
+def test_v2_main_grid_is_10_seeds_plus_the_careless_contrast():
     from experiments.grid import v2_main_configs
 
     configs = v2_main_configs()
-    assert len(configs) == 180 and len({c.episode_id for c in configs}) == 180
+    assert len(configs) == 150 and len({c.episode_id for c in configs}) == 150
     assert {c.agents for c in configs} == {3}
-    assert [c.seed for c in configs] == sorted(c.seed for c in configs)
-    assert {c.seed for c in configs} == set(range(12))
+    assert {c.seed for c in configs} == set(range(10))
     careful = [c for c in configs if not c.careless]
     careless = [c for c in configs if c.careless]
     planned_split = [c for c in careful if c.split and c.planning]
     noplan_split = [c for c in careful if c.split and not c.planning]
     control = [c for c in careful if c.role == "collude"]
-    every_defense = dict.fromkeys(("open", "seal_side", "seal_side_para"), 12)
+    every_defense = dict.fromkeys(("open", "seal_side", "seal_side_para"), 10)
     assert Counter(c.defense for c in planned_split) == every_defense
     assert Counter(c.defense for c in control) == every_defense
-    assert len(noplan_split) == 12 and {c.defense for c in noplan_split} == {"open"}
+    assert len(noplan_split) == 10 and {c.defense for c in noplan_split} == {"open"}
     assert {c.k for c in configs if c.collude} == {8}
-    assert Counter(c.role for c in configs if not c.collude) == {"honest": 36, "honest_hard": 36}
+    assert Counter(c.role for c in configs if not c.collude) == {"honest": 30, "honest_hard": 30}
     assert {c.variant for c in configs if c.collude} == {"base"}
-    assert Counter(c.role for c in careless) == {"collude_split": 12, "collude": 12}
+    assert Counter(c.role for c in careless) == {"collude_split": 10, "collude": 10}
     assert {c.defense for c in careless} == {"open"}
 
 
-def test_v2_arm_bases_are_12_per_role_and_exclude_the_careless_contrast():
+def test_v2_arm_bases_are_10_per_role_and_exclude_the_careless_contrast():
     from env.replay import arm_bases
     from experiments.grid import v2_main_configs
 
@@ -115,9 +114,9 @@ def test_v2_arm_bases_are_12_per_role_and_exclude_the_careless_contrast():
     ]
     bases = arm_bases(records)
     assert Counter(r["config"]["role"] for r in bases) == {
-        "collude_split": 12,
-        "collude": 12,
-        "honest": 12,
+        "collude_split": 10,
+        "collude": 10,
+        "honest": 10,
     }
     assert not [r for r in bases if r["config"]["careless"]]
 
@@ -191,11 +190,12 @@ def test_the_budget_guard_is_the_estimate_plus_ten_percent():
     )
 
     configs = v2_main_configs()
-    budget = token_budget(configs)
-    assert budget["episodes"] == round(sum(EPISODE_TOKENS[c.role] for c in configs) * 1.1)
-    assert budget["scoring"] == round(180 * SCORING_TOKENS * 1.1)
-    assert arm_budget(36) == round(36 * ARM_TOKENS * 1.1)
-    assert token_budget(v2_main_configs(range(10)))["episodes"] < budget["episodes"]
+    budget = token_budget(configs, arm_bases=30)
+    episodes = sum(EPISODE_TOKENS[c.role] for c in configs) + 30 * ARM_TOKENS
+    assert budget["episodes"] == round(episodes * 1.1)
+    assert budget["scoring"] == round(sum(SCORING_TOKENS[c.role] for c in configs) * 1.1)
+    assert arm_budget(30) == round(30 * ARM_TOKENS * 1.1)
+    assert token_budget(v2_main_configs(range(5)))["episodes"] < budget["episodes"]
 
 
 def test_ten_seeds_keep_every_cell():
@@ -204,4 +204,58 @@ def test_ten_seeds_keep_every_cell():
     configs = v2_main_configs(range(10))
     assert len(configs) == 150
     cells = {(c.role, c.defense, c.planning, c.careless) for c in configs}
-    assert cells == {(c.role, c.defense, c.planning, c.careless) for c in v2_main_configs()}
+    twelve = v2_main_configs(range(12))
+    assert cells == {(c.role, c.defense, c.planning, c.careless) for c in twelve}
+
+
+# --- the stages (addenda, section 12) ---
+
+
+def test_the_stages_run_in_the_order_asked_for():
+    from experiments.grid import V2_RUN_ORDER, v2_main_stages
+
+    assert V2_RUN_ORDER == ("honest", "careful", "arms", "noplan", "careless")
+    assert tuple(v2_main_stages()) == V2_RUN_ORDER
+
+
+def test_each_stage_holds_exactly_its_cells():
+    from experiments.grid import v2_main_stages
+
+    stages = v2_main_stages()
+    assert {c.role for c in stages["honest"]} == {"honest", "honest_hard"}
+    assert len(stages["honest"]) == 60
+    careful = stages["careful"]
+    assert {c.role for c in careful} == {"collude_split", "collude"} and len(careful) == 60
+    assert all(c.planning and not c.careless for c in careful)
+    assert stages["arms"] == []
+    noplan = stages["noplan"]
+    assert len(noplan) == 10 and all(c.split and not c.planning for c in noplan)
+    careless = stages["careless"]
+    assert len(careless) == 20 and all(c.careless and c.defense == "open" for c in careless)
+
+
+def test_the_arm_bases_all_run_before_the_arms():
+    from env.replay import arm_bases
+    from experiments.grid import v2_main_configs, v2_main_stages
+
+    stages = v2_main_stages()
+    before = {c.episode_id for c in stages["honest"] + stages["careful"]}
+    records = [
+        {"episode_id": c.episode_id, "status": "ok", "config": vars(c)} for c in v2_main_configs()
+    ]
+    assert {r["episode_id"] for r in arm_bases(records)} <= before
+
+
+def test_a_stage_cut_short_keeps_its_matched_sets():
+    from experiments.grid import v2_main_stages
+
+    for name, configs in v2_main_stages().items():
+        seeds = [c.seed for c in configs]
+        assert seeds == sorted(seeds), name
+
+
+def test_every_stage_still_runs_each_seed_on_one_task():
+    from experiments.grid import v2_main_configs
+
+    for c in v2_main_configs():
+        assert c.task_id == task_for_seed(c.seed)

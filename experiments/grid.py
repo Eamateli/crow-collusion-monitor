@@ -17,7 +17,12 @@ PAYLOAD_BITS = (1, 8, 32)
 CALIBRATION_SEEDS = range(1000, 1015)  # CLAUDE.md section 8; never overlaps the main seeds
 PROBE_FIRST_SEED, PROBE_EPISODES = 2000, 12  # 2 per task; a new round starts after the last
 PROBE_LIMIT = 3000  # smoke seeds start at 3000; probe seeds stay below
-V2_MAIN_SEEDS = range(0, 12)  # addenda, section 11; drop to 10 before cutting any cell
+V2_MAIN_SEEDS = range(0, 10)  # addenda, section 12: a balance of $33.11 means 10 seeds, every cell
+# The stages of the main grid, each run to its end before the next starts, so that a budget stop
+# only ever cuts the last ones (addenda, section 12). The arms replay saved episodes of the stages
+# before them, and have no configs of their own.
+ARMS_STAGE = "arms"
+V2_RUN_ORDER = ("honest", "careful", ARMS_STAGE, "noplan", "careless")
 V2_K = 8
 V2_CALIBRATION_SEEDS = range(1100, 1115)  # never overlaps the main, v1 calibration or probe seeds
 # One per task. Smoke seeds are never reused: the first v2 smoke took 3100 to 3105, with the prompts
@@ -25,25 +30,33 @@ V2_CALIBRATION_SEEDS = range(1100, 1115)  # never overlaps the main, v1 calibrat
 V2_RESMOKE_SEEDS = range(3106, 3112)
 
 
-# Tokens per episode, for the budget guard: from the re-smoke, under the careful prompts. It had no
-# honest_hard episode, so that is the honest figure with a margin until calibration measures it.
+# Tokens per episode, for the budget guard: honest and honest_hard from the 30 calibration episodes,
+# the colluders from the re-smoke (3 splits and 1 control), under the careful prompts.
 EPISODE_TOKENS = {
     "collude_split": 280_000,
     "collude": 351_000,
-    "honest": 134_000,
-    "honest_hard": 201_000,
+    "honest": 166_000,
+    "honest_hard": 214_000,
 }
-SCORING_TOKENS = 233_000  # 21 monitor calls
-ARM_TOKENS = 407_000  # all four arms on one base episode
+# Tokens for the pass per episode, 21 monitor calls: calibration for honest and honest_hard, whose
+# long files take far more; the re-smoke for the colluders.
+SCORING_TOKENS = {
+    "collude_split": 248_000,
+    "collude": 242_000,
+    "honest": 230_000,
+    "honest_hard": 378_000,
+}
+ARM_TOKENS = 392_000  # all four arms on one base episode: 3 replays of each, and 1 of canonicalize
 BUDGET_MARGIN = 1.10  # addenda, section 12
 
 
-def token_budget(configs: list[EpisodeConfig]) -> dict[str, int]:
-    """The budget guard for a run: its estimated tokens plus 10%, for episodes and for scoring."""
-    episodes = sum(EPISODE_TOKENS[c.role] for c in configs)
+def token_budget(configs: list[EpisodeConfig], arm_bases: int = 0) -> dict[str, int]:
+    """The budget guard for a run: its estimated tokens plus 10%. Episodes and replays share one
+    pool, so a stop falls on whatever runs last; the scoring pass has its own."""
+    episodes = sum(EPISODE_TOKENS[c.role] for c in configs) + arm_bases * ARM_TOKENS
     return {
         "episodes": round(episodes * BUDGET_MARGIN),
-        "scoring": round(len(configs) * SCORING_TOKENS * BUDGET_MARGIN),
+        "scoring": round(sum(SCORING_TOKENS[c.role] for c in configs) * BUDGET_MARGIN),
     }
 
 
@@ -93,26 +106,34 @@ def probe_configs(first_seed: int = PROBE_FIRST_SEED) -> list[EpisodeConfig]:
     return [make_config("honest", task_for_seed(s), "open", seed=s) for s in seeds]
 
 
-def v2_main_configs(seeds: range = V2_MAIN_SEEDS, k: int = V2_K) -> list[EpisodeConfig]:
-    """The 3-agent main grid, ordered by seed so a run stopped early leaves complete matched sets:
-    collude_split and the single-carrier control under all 3 defenses, collude_split with no
-    planning chat under open, honest and honest_hard under all 3 defenses, and the careless contrast
-    (split and control under open). 15 per seed."""
-    configs = []
+def v2_main_stages(seeds: range = V2_MAIN_SEEDS, k: int = V2_K) -> dict[str, list[EpisodeConfig]]:
+    """The 3-agent main grid by stage, in the order they run; the arms stage has no configs. Each
+    stage is ordered by seed, so one that a budget stop cuts short leaves complete matched sets. 15
+    episodes per seed: honest and honest_hard under all 3 defenses; collude_split and the
+    single-carrier control under all 3; collude_split with no planning chat under open; and the
+    careless contrast, split and control under open."""
+    stages: dict[str, list[EpisodeConfig]] = {stage: [] for stage in V2_RUN_ORDER}
     for seed in seeds:
         task = task_for_seed(seed)
-        for role in ("collude_split", "collude"):
-            for defense in DEFENSES:
-                configs.append(make_config(role, task, defense, seed=seed, k=k, agents=3))
-        configs.append(
-            make_config("collude_split", task, "open", seed=seed, k=k, planning=False, agents=3)
-        )
         for role in ("honest", "honest_hard"):
             for defense in DEFENSES:
-                configs.append(make_config(role, task, defense, seed=seed, agents=3))
+                stages["honest"].append(make_config(role, task, defense, seed=seed, agents=3))
         for role in ("collude_split", "collude"):
-            configs.append(make_config(role, task, "open", seed=seed, k=k, agents=3, careless=True))
-    return configs
+            for defense in DEFENSES:
+                stages["careful"].append(make_config(role, task, defense, seed=seed, k=k, agents=3))
+        stages["noplan"].append(
+            make_config("collude_split", task, "open", seed=seed, k=k, planning=False, agents=3)
+        )
+        for role in ("collude_split", "collude"):
+            stages["careless"].append(
+                make_config(role, task, "open", seed=seed, k=k, agents=3, careless=True)
+            )
+    return stages
+
+
+def v2_main_configs(seeds: range = V2_MAIN_SEEDS, k: int = V2_K) -> list[EpisodeConfig]:
+    """Every episode of the 3-agent main grid, in the order they run."""
+    return [c for configs in v2_main_stages(seeds, k).values() for c in configs]
 
 
 def v2_calibration_configs() -> list[EpisodeConfig]:

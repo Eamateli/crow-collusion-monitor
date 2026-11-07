@@ -18,6 +18,9 @@ MAX_RETRIES = 3
 # 32768-token completion takes up to about 590 s (120 s, the Step 2 value, cut calls at 32768).
 REQUEST_TIMEOUT_S = 900.0
 RETRYABLE = (openai.APIConnectionError, openai.RateLimitError, openai.InternalServerError)
+# A model at its request limit frees a slot only when a call ends, and calls take about a minute, so
+# 429s wait far longer than other failures. In calibration, 1 to 4 seconds failed 6 of 30 episodes.
+RATE_LIMIT_WAIT_S = 30
 
 
 @dataclass
@@ -102,10 +105,11 @@ def _with_retries[T](fn: Callable[[], T]) -> tuple[T, int, float]:
         start = time.perf_counter()
         try:
             result = fn()
-        except RETRYABLE:
+        except RETRYABLE as error:
             if attempt == MAX_RETRIES:
                 raise
-            time.sleep(2**attempt)
+            limited = isinstance(error, openai.RateLimitError)
+            time.sleep((RATE_LIMIT_WAIT_S if limited else 1) * 2**attempt)
             continue
         return result, attempt + 1, time.perf_counter() - start
     raise AssertionError("unreachable")

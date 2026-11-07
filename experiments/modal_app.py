@@ -24,6 +24,7 @@ import modal
 from env.episode import EpisodeConfig, make_config, run_episode
 from env.replay import ARMS, arm_bases, arm_episode_id, arms_run_for, run_arm
 from experiments.grid import (
+    ARMS_STAGE,
     PROBE_FIRST_SEED,
     arm_budget,
     calibration_configs,
@@ -32,6 +33,7 @@ from experiments.grid import (
     token_budget,
     v2_calibration_configs,
     v2_main_configs,
+    v2_main_stages,
     v2_resmoke_configs,
 )
 from experiments.score_v2 import DONE_MARKER, follow_run, run_finished, score_run
@@ -54,6 +56,10 @@ RUNS = ("smoke", "probe", "calibration", "main", "v2_smoke", "v2_intervention", 
 SCORING_TIMEOUT = 12 * 3600
 LAUNCHER_TIMEOUT = 20 * 3600  # it waits for the pass, so it outlasts it
 MAX_RUNNING = 12  # episodes or replays at a time (CLAUDE.md section 9)
+# Modal restarts a preempted function on the same input (modal.com/docs/guide/preemption). The two
+# drivers can't be, at 3x the CPU and memory price of a nearly idle container: a restarted launcher
+# would send episodes that are still running a second time. A preempted episode writes its record
+# once, when it ends, so episodes stay preemptible.
 SMOKE_SEED = 3000  # smoke seeds are 3000 and up (CLAUDE.md section 5, Results namespaces)
 
 app = modal.App(APP_NAME)
@@ -139,6 +145,7 @@ def run_episode_remote(payload: dict) -> dict:
     timeout=SCORING_TIMEOUT,
     max_containers=1,
     retries=1,
+    nonpreemptible=True,
 )
 def score_run_remote(run: str, episode_ids: list[str] | None, max_tokens: int) -> dict:
     """The scoring pass in a container. With `episode_ids` it follows a grid as episodes finish;
@@ -302,17 +309,31 @@ def _set_episodes_done(run: str, done: bool) -> None:
     volume.commit()
 
 
-def _run_jobs(function, jobs: list[dict], max_tokens: int, on_progress, workers: int = MAX_RUNNING):
-    """Run jobs at most `workers` at a time. The budget guard is checked before each job is sent,
-    so a stop leaves nothing queued; jobs already running finish and are counted."""
-    lock = threading.Lock()
-    state = {
+def _new_state() -> dict:
+    return {
         "finished": 0,
         "failed": [],
         "exceptions": [],
         "tokens": 0,
         "stopped_by_budget": False,
+        "not_sent": {},
     }
+
+
+def _run_jobs(
+    function,
+    jobs: list[dict],
+    max_tokens: int,
+    on_progress,
+    *,
+    state: dict | None = None,
+    workers: int = MAX_RUNNING,
+) -> dict:
+    """Run jobs at most `workers` at a time. The budget guard is checked before each job is sent,
+    so a stop leaves nothing queued; jobs already running finish and are counted. `state` lets
+    several calls draw on one budget, and a job a stop keeps back is counted under its stage."""
+    lock = threading.Lock()
+    state = _new_state() if state is None else state
 
     def report() -> None:
         try:
@@ -324,6 +345,8 @@ def _run_jobs(function, jobs: list[dict], max_tokens: int, on_progress, workers:
         with lock:
             if state["tokens"] >= max_tokens:
                 state["stopped_by_budget"] = True
+                stage = state.get("stage", "")
+                state["not_sent"][stage] = state["not_sent"].get(stage, 0) + 1
                 return
         try:
             result = function.remote(job)
@@ -351,7 +374,25 @@ def _run_jobs(function, jobs: list[dict], max_tokens: int, on_progress, workers:
     return state
 
 
-def _launch_arms(base_run: str, only: str, arms: tuple[str, ...], max_tokens: int | None) -> dict:
+def _run_stages(stages: dict[str, list], state: dict, send_episodes, send_arms) -> dict:
+    """Each stage runs to its end before the next starts, and all draw on one budget, so a budget
+    stop only ever cuts the last stages (addenda, section 12)."""
+    for stage, configs in stages.items():
+        state["stage"] = stage
+        if stage == ARMS_STAGE:
+            send_arms(state)
+        else:
+            send_episodes(configs, state)
+    return state
+
+
+def _launch_arms(
+    base_run: str,
+    only: str,
+    arms: tuple[str, ...],
+    max_tokens: int | None,
+    state: dict | None = None,
+) -> dict:
     """Every arm on every matching finished episode of `base_run` (addenda, section 10)."""
     out_run = arms_run_for(base_run)
     bases = [r for r in arm_bases(_records(base_run)) if only in r["episode_id"]]
@@ -380,6 +421,7 @@ def _launch_arms(base_run: str, only: str, arms: tuple[str, ...], max_tokens: in
         jobs,
         budget,
         lambda s: _write_json(out_run, "launcher.json", {**status, **s}),
+        state=state,
     )
     _write_json(out_run, "launcher.json", {**status, **state, "state": "done"})
     return state
@@ -392,6 +434,7 @@ def _launch_arms(base_run: str, only: str, arms: tuple[str, ...], max_tokens: in
     timeout=LAUNCHER_TIMEOUT,
     max_containers=1,
     retries=1,
+    nonpreemptible=True,
 )
 def launch_run_remote(
     run: str,
@@ -399,12 +442,12 @@ def launch_run_remote(
     only: str = "",
     max_tokens: int | None = None,
     scoring_tokens: int | None = None,
-    arms_after: bool = False,
 ) -> dict:
     """A whole 3-agent run, driven from inside Modal so that nothing local can end it: v1 lost 65
-    episodes when its local driver stopped (addenda, section 12). It submits the episodes, starts
-    the scoring pass, says when the episodes are done, and waits for the pass. A second launch
-    resumes from the Volume. `max_tokens` and `scoring_tokens` replace the estimate plus 10%.
+    episodes when its local driver stopped (addenda, section 12). It starts the scoring pass, runs
+    the stages in order, says when the episodes are done, and waits for the pass. A second launch
+    resumes from the Volume. `max_tokens` and `scoring_tokens` replace the estimate plus 10%. The
+    arms are a stage of v2_main, and are left out when `only` picks some of its episodes.
     """
     if run not in V2_GRIDS:
         raise ValueError(f"not a 3-agent run: {run!r}")
@@ -415,15 +458,24 @@ def launch_run_remote(
 
         if not load_config(FROZEN_V2_PATH).frozen:
             raise RuntimeError("v2 main run refused: this container has no crow/frozen_v2.json")
-    configs = V2_GRIDS[run](range(seeds)) if seeds else V2_GRIDS[run]()
-    configs = [c for c in configs if only in c.episode_id]
-    budget = token_budget(configs)
+        stages = v2_main_stages(range(seeds)) if seeds else v2_main_stages()
+    else:
+        stages = {run: V2_GRIDS[run]()}
+    stages = {
+        name: [c for c in configs if only in c.episode_id] for name, configs in stages.items()
+    }
+    if only:
+        stages.pop(ARMS_STAGE, None)
+    configs = [c for group in stages.values() for c in group]
+    planned = [{"episode_id": c.episode_id, "status": "ok", "config": vars(c)} for c in configs]
+    bases = len(arm_bases(planned)) if ARMS_STAGE in stages else 0
+    budget = token_budget(configs, bases)
     episode_budget = max_tokens or budget["episodes"]
-    jobs = to_run(configs, run)
     status = {
         "state": "running",
         "configs": len(configs),
-        "to_run": len(jobs),
+        "stages": {name: len(group) for name, group in stages.items()},
+        "arm_bases": bases,
         "seeds": seeds,
         "episode_budget": episode_budget,
         "scoring_budget": scoring_tokens or budget["scoring"],
@@ -435,16 +487,25 @@ def launch_run_remote(
         run, [c.episode_id for c in configs], scoring_tokens or budget["scoring"]
     )
     status["scoring_call"] = scoring.object_id
-    state = _run_jobs(
-        run_episode_remote,
-        jobs,
-        episode_budget,
-        lambda s: _write_json(run, "launcher.json", {**status, **s}),
+
+    def progress(current: dict) -> None:
+        _write_json(run, "launcher.json", {**status, **current})
+
+    def send_arms(current: dict) -> None:
+        progress(current)  # the replays report to their own folder: show the stage here too
+        _launch_arms(run, "", ARMS, episode_budget, current)
+        progress(current)
+
+    state = _run_stages(
+        stages,
+        _new_state(),
+        lambda group, current: _run_jobs(
+            run_episode_remote, to_run(group, run), episode_budget, progress, state=current
+        ),
+        send_arms,
     )
     _set_episodes_done(run, True)
     _write_json(run, "launcher.json", {**status, **state, "state": "episodes done"})
-    if arms_after and not state["stopped_by_budget"]:
-        state["arms"] = _launch_arms(run, "", ARMS, None)
     try:
         state["scoring"] = scoring.get()
     except Exception as error:  # noqa: BLE001 - reported in the status file, never dropped
@@ -460,6 +521,7 @@ def launch_run_remote(
     timeout=LAUNCHER_TIMEOUT,
     max_containers=1,
     retries=1,
+    nonpreemptible=True,
 )
 def launch_arms_remote(base_run: str, only: str, arms: list[str]) -> dict:
     """Intervention arms alone, from inside Modal: for a check on a run that has already ended."""

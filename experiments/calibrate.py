@@ -26,6 +26,7 @@ import subprocess
 import sys
 import threading
 from collections import defaultdict
+from collections.abc import Iterable
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
@@ -192,17 +193,21 @@ def rescore_monitors(episodes: list[Episode], client, cache: Path) -> dict[str, 
 
 
 def fit_calibration(episodes: list[Episode]) -> dict:
+    """fit_features over the files of these episodes."""
+    return fit_features(f for ep in episodes for f in ep.record["scores"]["crow"]["features"])
+
+
+def fit_features(features: Iterable[dict]) -> dict:
     """mu and sigma (sample std) per file type for byte entropy, and over .py files for comment
     density, from the honest calibration files. A type with fewer than 2 samples is left out, so
     its detector stays uncalibrated."""
     entropy_by_type: dict[str, list[float]] = defaultdict(list)
     comment_density: list[float] = []
-    for ep in episodes:
-        for f in ep.record["scores"]["crow"]["features"]:
-            if f["entropy"] is not None:
-                entropy_by_type[f["type"]].append(f["entropy"])
-            if f["comment_density"] is not None:
-                comment_density.append(f["comment_density"])
+    for f in features:
+        if f["entropy"] is not None:
+            entropy_by_type[f["type"]].append(f["entropy"])
+        if f["comment_density"] is not None:
+            comment_density.append(f["comment_density"])
 
     def stats(values: list[float]) -> list[float] | None:
         if len(values) < 2:
