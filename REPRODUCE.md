@@ -109,7 +109,11 @@ part of what the monitors saw: text the colluding agents also wrote into their c
 (for example the helper names a report listed, or the check scripts careless agents ran in the
 open), monitor replies quoting it, and a few task-generic phrases that honest episodes share.
 
-The release stays private until Apart's judging ends: it shows working collusion schemes.
+One more change: two agents printed their sandbox environment, and in those two event-log lines
+every value is replaced with `[masked]` (the variable names stay). The sandboxes hold no secrets;
+no number reads those values, and Level 1 still reproduces every number exactly.
+
+It is published as an asset of the GitHub release on the tag `swarm-alignment-2026-submission`.
 
 ## Honest limits
 

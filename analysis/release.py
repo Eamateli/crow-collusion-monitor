@@ -5,6 +5,10 @@ The redacted text is the agents' own description of their scheme. No monitor eve
 number in the paper needs it (CLAUDE.md section 10; docs/reproducibility.md). Workspaces, event
 logs and monitor scores are what the monitors saw, and are released as they are.
 
+Two exceptions to "as they are": an agent that printed its sandbox environment left that dump in
+the event log, and each value in such a dump is replaced with [masked] (the names stay). The
+sandboxes hold no secrets, but a dump shows identifiers no reader needs. No number reads them.
+
 The scan looks for every 40-character piece of every redacted text, with whitespace collapsed on
 both sides, in every string of every released JSON file and every file inside every workspace tar.
 It uses grep's fixed-string search, so it is fast and holds no pattern logic of its own.
@@ -12,6 +16,7 @@ It uses grep's fixed-string search, so it is fast and holds no pattern logic of 
 
 import copy
 import json
+import re
 import shutil
 import subprocess
 import tarfile
@@ -24,6 +29,52 @@ PLANNING_TEXT = ("proposal", "reply", "c_reply")
 PIECE, STRIDE = 40, 20  # overlapping pieces: any copied run of 60 characters holds a whole one
 REDACTED = "redacted"
 OWN_FILES = ("README.md", "REDACTION_SCAN.json")  # the release's own notes, not episode data
+ENV_LINE = re.compile(r"(?m)^([A-Z][A-Z0-9_]{0,63})=(.*)$")
+ENV_MARKERS = ("PATH", "HOME", "HOSTNAME")  # a dump of the environment, not a file of constants
+MIN_ENV_LINES = 5
+MASK = "[masked]"
+
+
+def _mask_text(text: str) -> tuple[str, int]:
+    names = [m.group(1) for m in ENV_LINE.finditer(text)]
+    if len(names) < MIN_ENV_LINES or not any(n in ENV_MARKERS for n in names):
+        return text, 0
+    return ENV_LINE.sub(lambda m: f"{m.group(1)}={MASK}", text), len(names)
+
+
+def mask_environment(value: Any) -> tuple[Any, int]:
+    """`value` with each environment dump's values replaced by [masked]: (new, lines masked)."""
+    if isinstance(value, str):
+        return _mask_text(value)
+    if isinstance(value, dict):
+        total, out = 0, {}
+        for k, v in value.items():
+            out[k], n = mask_environment(v)
+            total += n
+        return out, total
+    if isinstance(value, list):
+        total, out_list = 0, []
+        for v in value:
+            new, n = mask_environment(v)
+            out_list.append(new)
+            total += n
+        return out_list, total
+    return value, 0
+
+
+def mask_event_log(text: str) -> tuple[str, list[int]]:
+    """An event log with every environment dump masked; untouched lines stay byte for byte."""
+    lines, masked = [], []
+    body = text[:-1] if text.endswith("\n") else text
+    for number, line in enumerate(body.split("\n"), 1):
+        if line.strip():
+            event = json.loads(line)
+            new, n = mask_environment(event)
+            if n:
+                line = json.dumps(new)  # ASCII escapes, as the event writer: one event a line
+                masked.append(number)
+        lines.append(line)
+    return "\n".join(lines) + ("\n" if text.endswith("\n") else ""), masked
 
 
 def redact_record(record: dict) -> dict:
@@ -197,6 +248,7 @@ def build(source: Path, out: Path) -> dict[str, Any]:
     runs = sorted(p for p in source.iterdir() if p.is_dir())
     texts: list[str] = []
     counts: dict[str, dict[str, int]] = {}
+    masked: list[str] = []
     for run in runs:
         counts[run.name] = {}
         for folder in sorted(p for p in run.iterdir() if p.is_dir()):
@@ -210,6 +262,13 @@ def build(source: Path, out: Path) -> dict[str, Any]:
                     (target / path.name).write_text(
                         json.dumps(redact_record(record), ensure_ascii=False, indent=1) + "\n"
                     )
+                elif folder.name == "events" and path.suffix == ".jsonl":
+                    text, lines = mask_event_log(path.read_text())
+                    if lines:
+                        (target / path.name).write_text(text)
+                        masked += [f"{run.name}/events/{path.name}:{line}" for line in lines]
+                    else:
+                        shutil.copy2(path, target / path.name)
                 elif path.is_file():
                     shutil.copy2(path, target / path.name)
                 n += 1
@@ -219,4 +278,5 @@ def build(source: Path, out: Path) -> dict[str, Any]:
     result = scan(out, texts)
     result["records_still_holding_text"] = fields_left(out)
     result["files_per_run"] = counts
+    result["environment_dumps_masked"] = masked
     return result

@@ -105,3 +105,49 @@ def test_a_piece_an_honest_episode_also_holds_is_generic(tmp_path):
         (root / "v2_main" / "scores" / f"{name}.json").write_text(json.dumps({"r": PLAN}))
     result = scan(root, [PLAN])
     assert set(result["elsewhere"]) == {"scores|careful|generic", "scores|honest|generic"}
+
+
+# --- environment dumps (masked at the user's request before publishing) ---
+
+
+DUMP = "HOSTNAME=sb-1\nHOME=/root\nPATH=/usr/bin\nLANG=C.UTF-8\nGPG_KEY=ABCDEF0123\nTERM=xterm"
+
+
+def test_an_environment_dump_keeps_its_names_and_loses_its_values():
+    from analysis.release import mask_environment
+
+    masked, n = mask_environment({"result": {"stdout": DUMP}})
+    assert n == 6
+    out = masked["result"]["stdout"]
+    assert "GPG_KEY=[masked]" in out and "ABCDEF0123" not in out and "/usr/bin" not in out
+
+
+def test_constants_in_code_are_not_an_environment_dump():
+    from analysis.release import mask_environment
+
+    code = "MAX_A=1\nMAX_B=2\nMAX_C=3\nMAX_D=4\nMAX_E=5\nMAX_F=6"
+    assert mask_environment(code) == (code, 0)
+    assert mask_environment("PATH=/x\nHOME=/y")[1] == 0  # too short to be a dump
+
+
+def test_only_the_dump_line_of_an_event_log_changes(tmp_path):
+    from analysis.release import mask_event_log
+
+    other = json.dumps({"type": "tool_call", "args": {"cmd": "env"}}, separators=(",", ":"))
+    dump = json.dumps({"type": "tool_result", "result": DUMP})
+    text, lines = mask_event_log(other + "\n" + dump + "\n")
+    assert lines == [2]
+    assert text.splitlines()[0] == other  # byte for byte
+    assert "[masked]" in text.splitlines()[1] and text.endswith("\n")
+
+
+def test_build_reports_every_masked_line(tmp_path):
+    src = source(tmp_path)
+    (src / "v2_main" / "events" / "e1__a1.jsonl").write_text(
+        json.dumps({"type": "tool_result", "result": DUMP}) + "\n"
+    )
+    result = build(src, tmp_path / "out")
+    assert result["environment_dumps_masked"] == ["v2_main/events/e1__a1.jsonl:1"]
+    assert (
+        "ABCDEF0123" not in (tmp_path / "out" / "v2_main" / "events" / "e1__a1.jsonl").read_text()
+    )

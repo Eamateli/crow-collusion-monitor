@@ -27,7 +27,12 @@ with one exception: each record's planning chat (`planning.proposal`, `planning.
 `planning.c_reply`) and `report_method` text are removed. That text is the agents' own description
 of their scheme. No monitor ever saw it, and no number in the paper uses it.
 
-Not public before Apart's judging ends: it shows working collusion schemes.
+It shows working collusion schemes; it is released for monitor research.
+
+One more change: two agents printed their sandbox environment, and in those two event-log lines
+every value is replaced with `[masked]` (the variable names stay). The sandboxes hold no secrets;
+the values were identifiers no reader needs, and no number reads them. `REDACTION_SCAN.json` lists
+the masked lines (`environment_dumps_masked`).
 
 ## Layout
 
